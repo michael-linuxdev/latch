@@ -716,6 +716,9 @@ var BUILTINS = {
   'Text.bytes': { right: null, n: 1, ret: 'clean', p: ['Text'], r: 'Ints' },
   'List.at': { right: null, n: 2, ret: 'clean', fallible: 'Missing', p: ['List', 'Int'], r: 'Elem' },
   'Table.fill': { right: null, n: 2, ret: 'clean', p: ['Int', 'Any'], r: 'Fill' },
+  'Interrupt.next': { right: 'Interrupt', n: 0, ret: 'clean', fallible: 'Missing', p: [], r: 'Event' },
+  'Interrupt.wait': { right: 'Interrupt', n: 0, ret: 'clean', p: [], r: 'Event' },
+  'Interrupt.lost': { right: 'Interrupt', n: 0, ret: 'clean', p: [], r: 'Int' },
   'Bits.and': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
   'Bits.or': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
   'Bits.xor': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
@@ -729,6 +732,7 @@ var BUILTINS = {
 };
 var VGA_BASE = 0xB8000, VGA_COLS = 80, VGA_ROWS = 25, VGA_END = VGA_BASE + VGA_COLS * VGA_ROWS * 2 - 1;
 function hex(n) { return '0x' + n.toString(16).toUpperCase(); }
+var EVENT_QUEUE = 64;
 var CATALOG = ['Net', 'File', 'Clock', 'Random', 'Env', 'Process', 'Console', 'Memory', 'Port', 'Cpu', 'Tasks', 'Interrupt'];
 var LIBMODS = {};
 Object.keys(BUILTINS).forEach(function (q) { LIBMODS[q.split('.')[0]] = true; });
@@ -904,7 +908,7 @@ function checkProgram(prog) {
   }
   function warn(line, msg) { var o = { line: line, msg: msg }; if (curMod) o.module = curMod; warnings.push(o); }
   function each(list, fn) { list.forEach(function (d) { curMod = d.module || ''; fn(d); }); curMod = ''; }
-  var types = {}, variants = {}, funcs = {}, enums = {}, consts = {}, handlers = {}, mainUsed = null;
+  var types = {}, variants = {}, funcs = {}, enums = {}, consts = {}, handlers = {}, mainUsed = null, eventT = null, eventBy = '';
   BUILTIN_ERRORS.forEach(function (e) { variants[e] = { enumName: e, fields: [], ftypesT: [] }; enums[e] = [e]; });
   variants.Done = { enumName: 'Done', fields: [], ftypesT: [] };
   enums.Done = ['Done'];
@@ -1093,7 +1097,9 @@ function checkProgram(prog) {
       var hn = f.handles.n;
       if (hn > 255) err(f.handles.line, 'Unterbrechungen haben die Nummern 0 bis 255, vorhanden ist ' + hn + '.');
       if (f.params.length) err(f.line, f.name + ' behandelt eine Unterbrechung und hat deshalb keine Parameter. Niemand ruft sie mit Werten auf.');
-      if (f.ret) err(f.line, f.name + ' behandelt eine Unterbrechung und gibt deshalb nichts zurück. Es gibt keinen Aufrufer, der das Ergebnis bekäme.');
+      if (!f.ret) err(f.line, f.name + ' behandelt eine Unterbrechung und meldet sie als Ereignis. Im Kopf fehlt der Ergebnistyp, zum Beispiel: -> Event');
+      if (f.errType) err(f.line, f.name + ' behandelt eine Unterbrechung und kann nicht scheitern, weil niemand den Fehler auffängt. Den Fehlerfall als eigene Variante des Ereignisses melden.');
+      if (f.retTaint !== 'clean') err(f.line, 'Das Ereignis von ' + f.name + ' ist ein geprüfter, offener Wert, weder unchecked noch secret.');
       if (f.assembly || f.foreign) err(f.line, 'handles steht nur an Funktionen mit Latch-Rumpf.');
       if (handlers[hn]) err(f.handles.line, 'Interrupt(' + hn + ') wird schon von ' + handlers[hn].name + ' behandelt. Jede Unterbrechung hat genau eine Funktion.');
       else handlers[hn] = f;
@@ -1119,6 +1125,11 @@ function checkProgram(prog) {
   each(prog.funcs, function (f) {
     f.paramT = f.params.map(function (p) { lowerName(p.name, 'Parameter', p.line); return resolve(p.tref, p.line); });
     f.retT = f.ret ? resolve(f.retRef, f.line) : T_DONE;
+    if (f.handles && f.ret && f.retT) {
+      if (f.retT.a || !enums[f.retT.n] || f.retT.n === 'Done') err(f.line, 'Das Ereignis von ' + f.name + ' ist eine Aufzählung (enum), vorhanden ist ' + tstr(f.retT) + '.');
+      else if (!eventT) { eventT = f.retT; eventBy = f.name; }
+      else if (!sameT(eventT, f.retT)) err(f.line, 'Alle Funktionen mit handles melden denselben Ereignistyp. ' + eventBy + ' meldet ' + tstr(eventT) + ', ' + f.name + ' meldet ' + tstr(f.retT) + '.');
+    }
   });
   function checkable(name, line, depth) {
     if (BASE_TYPES.indexOf(name) >= 0) return true;
@@ -1333,7 +1344,11 @@ function checkProgram(prog) {
           var addr = fold(e.args[0]);
           need(ctx, addr === null ? { name: b.right } : { name: b.right, lo: addr, hi: addr }, e.line, q);
         } else if (b.right) need(ctx, { name: b.right, arg: b.lit ? arg : null }, e.line, q);
-        var bt = b.r === 'Elem' ? (argT[0] && argT[0].a ? argT[0].a[0] : null)
+        if (e.mod === 'Interrupt') {
+          if (ctx.fn && ctx.fn.handles) err(e.line, 'Eine Funktion mit handles holt selbst keine Ereignisse ab. Das tut die Hauptschleife in main.');
+          if (b.r === 'Event' && !eventT) err(e.line, q + ' liefert Ereignisse, aber keine Funktion meldet welche. Es fehlt eine Funktion mit handles Interrupt(n).');
+        }
+        var bt = b.r === 'Event' ? eventT : b.r === 'Elem' ? (argT[0] && argT[0].a ? argT[0].a[0] : null)
           : b.r === 'Fill' ? T('Table', [argT[1] || null, e.args[0] ? fold(e.args[0]) : null]) : LIB[b.r];
         return R(b.ret, b.fallible || null, null, null, null, bt);
       }
@@ -1776,7 +1791,7 @@ function checkProgram(prog) {
       if (!used[i]) warn(d.line, f.name + ' verlangt ' + fmtRight(d) + ', nutzt es aber nicht. Rechte so knapp wie möglich halten.');
     });
     ctx.forever.forEach(function (ln) { report.forever.push({ name: f.name, line: ln, module: f.module || '' }); });
-    if (f.handles) report.interrupts.push({ n: f.handles.n, name: f.name, module: f.module || '' });
+    if (f.handles) report.interrupts.push({ n: f.handles.n, name: f.name, module: f.module || '', event: f.ret || '' });
     report.functions.push({
       name: f.name, line: f.line, module: f.module || '', assembly: false, foreign: false, handles: f.handles ? f.handles.n : null, forever: ctx.forever,
       rights: f.rights.map(fmtRight),
@@ -1846,7 +1861,7 @@ function RuntimeFail(msg, line) { this.message = msg; this.line = line || 0; }
 function HaltSignal(msg) { this.message = msg; }
 
 function parseWorld(text) {
-  var w = { input: {}, net: {}, port: {}, env: {}, foreign: {}, fileDown: {}, mailDown: false, keys: null, interrupts: null, rounds: 100 };
+  var w = { input: {}, net: {}, port: {}, env: {}, foreign: {}, fileDown: {}, mailDown: false, keys: null, interrupts: null, rounds: 100, ticks: 0 };
   (text || '').split('\n').forEach(function (raw) {
     var line = raw.trim();
     if (!line || line[0] === '#') return;
@@ -1864,6 +1879,7 @@ function parseWorld(text) {
     else if ((m = /^env\s+(\S+)\s*=\s?(.*)$/.exec(line))) w.env[m[1]] = m[2];
     else if ((m = /^foreign\s+(\S+)\s*=\s?(.*)$/.exec(line))) w.foreign[m[1]] = m[2];
     else if ((m = /^interrupts\s*=\s*(.*)$/.exec(line))) w.interrupts = m[1].split(/[\s,]+/).filter(Boolean).map(Number).filter(function (n) { return n >= 0 && n <= 255; });
+    else if ((m = /^ticks\s*=\s*(\d+)$/.exec(line))) w.ticks = Math.min(parseInt(m[1], 10), 1000);
     else if ((m = /^forever\s*=\s*(\d+)$/.exec(line))) w.rounds = Math.min(parseInt(m[1], 10), 10000);
     else if (/^mail\s*=\s*down$/.exec(line)) w.mailDown = true;
   });
@@ -1916,8 +1932,18 @@ function execute(info, worldText, proofs, lenient) {
   var world = parseWorld(worldText), out = [], tables = {}, steps = 0, depth = 0;
   var mem = {}, serial = '', stack = [], memOther = 0, screenUsed = false, globals = {};
   var handlers = info.handlers || {}, irq = world.interrupts;
-  /* Nachbau: Jede Taste löst die Unterbrechung 33 aus (IRQ 1 der Tastatur), einmal beim Drücken, einmal beim Loslassen. */
-  if (!irq && world.keys && handlers[33]) irq = world.keys.map(function () { return 33; });
+  var events = [], lost = 0;
+  /* Nachbau: Jede Taste löst die Unterbrechung 33 aus (IRQ 1 der Tastatur), einmal beim Drücken, einmal beim Loslassen.
+     "ticks = n" lässt die Uhr n-mal die Unterbrechung 32 auslösen, verteilt zwischen den Tasten. */
+  if (!irq && ((world.keys && handlers[33]) || (world.ticks && handlers[32]))) {
+    var left = handlers[32] ? world.ticks : 0;
+    irq = [];
+    (handlers[33] && world.keys || []).forEach(function (k, i) {
+      irq.push(33);
+      if (i % 2 === 1 && left > 0) { irq.push(32); left--; }
+    });
+    for (; left > 0; left--) irq.push(32);
+  }
   function snap(v) {
     if (Array.isArray(v)) return v.map(snap);
     if (isRecord(v)) { var f = {}; v.order.forEach(function (n) { f[n] = snap(v.f[n]); }); return { rec: v.rec, order: v.order, f: f }; }
@@ -1993,6 +2019,14 @@ function execute(info, worldText, proofs, lenient) {
       case 'Console.print': out.push({ kind: 'out', text: show(args[0]) }); return DONE;
       case 'Console.read': { var k = show(args[0]); return own(world.input, k) ? world.input[k] : ''; }
       case 'Env.get': { var ek = show(args[0]); return own(world.env, ek) ? world.env[ek] : ''; }
+      case 'Interrupt.next': return events.length ? events.shift() : new Err(mkVariant('Missing', 'Missing', [], []));
+      case 'Interrupt.wait':
+        while (!events.length) {
+          if (!irq || !irq.length) throw new HaltSignal('Interrupt.wait() in Zeile ' + line + ': Die Außenwelt liefert keine Unterbrechung mehr. Der Prüfstand hält hier an, echte Hardware würde schlafen.');
+          deliver(irq.shift(), line);
+        }
+        return events.shift();
+      case 'Interrupt.lost': return lost;
       case 'Bits.and': return Number(bits(args[0], line) & bits(args[1], line));
       case 'Bits.or': return Number(bits(args[0], line) | bits(args[1], line));
       case 'Bits.xor': return Number(bits(args[0], line) ^ bits(args[1], line));
@@ -2203,7 +2237,8 @@ function execute(info, worldText, proofs, lenient) {
   function deliver(n, line) {
     var h = handlers[n];
     if (!h) { out.push({ kind: 'irq', text: 'Unterbrechung ' + n + ': keine Funktion behandelt sie, verworfen' }); return; }
-    call(h, [], line);
+    var ev = call(h, [], line);
+    if (events.length >= EVENT_QUEUE) lost++; else events.push(ev);
   }
   function execBlock(stmts, env) {
     var local = child(env);
@@ -2288,10 +2323,8 @@ function execute(info, worldText, proofs, lenient) {
       }
       case 'Forever': {
         for (var round = 0; ; round++) {
-          if (irq) {
-            if (!irq.length) throw new HaltSignal('Keine Unterbrechung mehr in der Außenwelt. Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + (round === 1 ? ' Durchlauf' : ' Durchläufen') + ' an.');
-            deliver(irq.shift(), s.line);
-          } else if (round >= world.rounds) throw new HaltSignal('Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + ' Durchläufen an. Echte Hardware liefe weiter.');
+          if (irq && irq.length) deliver(irq.shift(), s.line);
+          if (round >= world.rounds) throw new HaltSignal('Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + ' Durchläufen an. Echte Hardware liefe weiter.');
           tick(s.line);
           execBlock(s.body, env);
         }
@@ -2364,7 +2397,8 @@ function execute(info, worldText, proofs, lenient) {
   }, funcs.main);
   if (failed && failed.halt) res.halted = failed.msg;
   else if (failed) res.runtimeError = failed;
-  else if (irq && irq.length) out.push({ kind: 'irq', text: irq.length + (irq.length === 1 ? ' Unterbrechung' : ' Unterbrechungen') + ' nicht zugestellt: Das Programm endete, ohne in forever zu warten.' });
+  else if (irq && irq.length) out.push({ kind: 'irq', text: irq.length + (irq.length === 1 ? ' Unterbrechung' : ' Unterbrechungen') + ' nicht ausgelöst: Das Programm endete vorher.' });
+  if (lost) out.push({ kind: 'irq', text: lost + (lost === 1 ? ' Ereignis' : ' Ereignisse') + ' verloren: Die Warteschlange fasst ' + EVENT_QUEUE + ', main hat sie nicht geleert.' });
   if (serial) out.push({ kind: 'serial', text: serial });
   if (memOther) out.push({ kind: 'mem', text: memOther + (memOther === 1 ? ' Byte' : ' Bytes') + ' außerhalb des Bildschirmspeichers geschrieben' });
   if (res.halted) out.push({ kind: 'halt', text: res.halted });

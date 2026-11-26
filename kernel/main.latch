@@ -1,0 +1,113 @@
+latch 1
+import Screen
+import Keyboard
+import Pages
+import Sched
+
+// Latch OS: Bildschirm, Tastatur,
+// Seitenverwalter und Planer in einem
+// Programm. Die Hardware meldet sich
+// ueber Unterbrechungen, main holt die
+// Ereignisse in der Hauptschleife ab.
+
+enum Event {
+    Key(code: Keyboard.Scan),
+    Tick,
+    Fault,
+}
+
+function on_key() -> Event
+    handles Interrupt(33)
+    uses Port(0x60)
+{
+    let code = Keyboard.read_scan()
+        otherwise return Fault
+    return Key(code)
+}
+
+function on_tick() -> Event
+    handles Interrupt(32)
+{
+    return Tick
+}
+
+function log(msg: Text)
+    uses Port(0x3F8)
+    assumes "COM1 serial port at 0x3F8"
+{
+    for b in Text.bytes(msg) {
+        Port.write(0x3F8, b)
+    }
+    Port.write(0x3F8, 10)
+}
+
+// Eine Zeitscheibe: Seite holen,
+// Aufgabe laufen lassen, Seite zurueck.
+// Ergebnis: die Aufgabe, die dran war.
+function slice(
+    change tasks: Table<Sched.Task, 3>,
+    change pool: Pages.Pool,
+    last: Int)
+    -> Int
+    uses Port(0x3F8), Cpu
+    requires last in 0..2
+    ensures result in 0..2
+    ensures pool.free == old(pool.free)
+{
+    let next = Sched.pick(tasks, last)
+    if next < 0 { return last }
+    let page = Pages.alloc(change pool)
+        otherwise return last
+    let name = tasks[next].name
+    log("{name} auf Seite {page.frame}")
+    Sched.step(change tasks, next)
+    Pages.free(change pool, take page)
+    return next
+}
+
+// Eine Taste auf den Bildschirm
+function type_key(
+    change cur: Screen.Cursor,
+    code: Keyboard.Scan)
+    uses Memory(0xB8000..0xB8F9F)
+{
+    let ch = Keyboard.decode(code)
+    if ch > 0 {
+        Screen.put(change cur, ch)
+    }
+}
+
+function main()
+    uses Memory(0xB8000..0xB8F9F),
+         Port(0x60), Port(0x3F8),
+         Cpu, Interrupt
+{
+    var cur = Screen.start()
+    Screen.print(change cur, "Latch OS 0.1")
+    Screen.newline(change cur)
+
+    var pool = Pages.pool(16)
+    var tasks = [
+        Sched.task("editor", 2),
+        Sched.task("backup", 3),
+        Sched.task("uhr", 1),
+    ]
+    var last = 2
+    log("Kern bereit")
+
+    forever {
+        let ev = Interrupt.wait()
+        match ev {
+            Key(code) -> {
+                type_key(change cur, code)
+            }
+            Tick -> {
+                last = slice(change tasks,
+                    change pool, last)
+            }
+            Fault -> {
+                log("Tastatur gestoert")
+            }
+        }
+    }
+}

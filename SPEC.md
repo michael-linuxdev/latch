@@ -129,11 +129,25 @@ Jede Zeile im Block läuft gleichzeitig, danach stehen die Namen zur Verfügung.
 
 ## Unterbrechungen
 
-    function on_key()
+    enum Event { Key(code: Byte), Tick, Fault }
+
+    function on_key() -> Event
         handles Interrupt(33)
         uses Port(0x60)
 
 Reihenfolge im Kopf damit: Parameter, `->`, `handles`, `uses`, `requires`, `ensures`, `assumes`.
+
+- Eine Funktion mit `handles` merkt sich nichts. Sie meldet ein Ereignis, das ist ihr Ergebnis.
+  Der Kern legt es in eine Warteschlange fester Größe.
+- Alle Funktionen mit `handles` melden denselben Typ, eine Aufzählung. Sie haben keine Parameter und kein `fails`.
+  Ein Fehlerfall ist eine eigene Variante des Ereignisses. Je Nummer gibt es genau eine Funktion.
+- `main` holt die Ereignisse in der Hauptschleife ab und braucht dafür `uses Interrupt`:
+  `Interrupt.wait()` schläft, bis eines da ist. `Interrupt.next()` wartet nicht und scheitert mit `Missing`.
+- Der ganze veränderliche Zustand bleibt so in `main`. Außerhalb von Funktionen gibt es keinen.
+- Ist die Warteschlange voll, geht das neue Ereignis verloren und wird gezählt: `Interrupt.lost()`.
+- Die Rechte einer Funktion mit `handles` müssen in denen von `main` enthalten sein.
+
+Vorschlag, im Prüfstand so umgesetzt, Entscheidung des Autors offen: Die Warteschlange fasst 64 Ereignisse.
 
 ## Beweise
 
@@ -171,8 +185,6 @@ Endlosschleifen sowie Assembler- und Fremdfunktionen.
   Die Varianten einer öffentlichen Aufzählung sind öffentlich.
 - Der Vertrag einer öffentlichen Funktion ist mindestens ein `requires` oder `ensures`.
   Bei `assembly` und `foreign` genügt die Annahme.
-- Eine Funktion mit `handles Interrupt(n)` hat keine Parameter und kein Ergebnis. Je Nummer gibt es genau eine.
-  Ihre Rechte müssen in denen von `main` enthalten sein.
 - In `together` steht in jeder Zeile ein `let`. Die Zeilen sehen die Namen der anderen nicht und benutzen
   nichts, was eine andere Zeile mit `change` oder `take` anfasst.
 - `forever` verlässt man nur mit `return`. Code dahinter ist eine Warnung.
@@ -184,7 +196,6 @@ Endlosschleifen sowie Assembler- und Fremdfunktionen.
 ## Offen
 
 - Die Prüfung des Namens "Latch" gegen Marken und Domains.
-- Wo sich eine Funktion mit `handles` etwas merkt, etwa die Schreibmarke. Es gibt keinen veränderlichen
-  Zustand außerhalb von Funktionen.
+- Die Größe der Warteschlange für Ereignisse (siehe "Unterbrechungen").
 
 Verwandtes Projekt: Vow (github.com/vow-lang/vow), verifizierte Sprache für KI-Agenten.

@@ -972,32 +972,91 @@ function main() { a() }`, '', r => r.errors.length === 2 && has(r, /Die foreign-
 
 const IRQ = `latch 1
 type Byte = Int where it in 0..255
-function on_key()
+enum Event { Key(code: Byte), Released, Tick, Fault }
+function on_key() -> Event
     handles Interrupt(33)
-    uses Port(0x60), Port(0x3F8)
+    uses Port(0x60)
 {
-    let code = check Port.read(0x60) as Byte otherwise return Done
-    if code < 128 { Port.write(0x3F8, 48 + code % 10) }
+    let code = check Port.read(0x60) as Byte otherwise return Fault
+    if Bits.test(code, 7) { return Released }
+    return Key(code)
 }
+function on_tick() -> Event handles Interrupt(32) { return Tick }
 `;
-t('interrupt: keys fire the handler while main waits', IRQ + `
-function main() uses Port(0x60), Port(0x3F8) {
-    forever { }
-}`, 'keys = ab', r => clean(r) && r.output[0].kind === 'serial' && r.output[0].text === '08' && /Keine Unterbrechung mehr/.test(r.halted) && r.warnings.length === 0
-  && r.report.interrupts.length === 1 && r.report.interrupts[0].n === 33 && r.report.functions[0].handles === 33);
+t('interrupt: handlers report events, main fetches them', IRQ + `
+function main() uses Port(0x60), Interrupt, Console {
+    var keys = 0
+    forever {
+        let ev = Interrupt.wait()
+        match ev {
+            Key(code) -> { keys = keys + 1
+                Console.print("Taste {code}") }
+            Released -> { }
+            Tick -> Console.print("tick")
+            Fault -> Console.print("kaputt")
+        }
+    }
+}`, 'keys = ab\nticks = 1', r => clean(r) && texts(r).indexOf('Taste 30,tick,Taste 48') === 0 && /Interrupt\.wait\(\) in Zeile \d+: Die Außenwelt liefert keine Unterbrechung mehr/.test(r.halted)
+  && r.warnings.length === 0 && r.report.interrupts.length === 2 && r.report.interrupts[0].event === 'Event' && r.report.functions[0].handles === 33);
+t('interrupt: next does not wait', IRQ + `
+function poll() -> Event uses Interrupt { return Interrupt.next() otherwise return Tick }
+function main() uses Port(0x60), Interrupt, Console {
+    match poll() {
+        Key(code) -> Console.print("zu frueh")
+        Released -> { }
+        Tick -> Console.print("nichts da")
+        Fault -> { }
+    }
+    var n = 0
+    forever {
+        n = n + 1
+        if n == 3 {
+            let ev = Interrupt.next() otherwise return Done
+            match ev {
+                Key(code) -> Console.print("Taste {code}")
+                Released -> { }
+                Tick -> { }
+                Fault -> { }
+            }
+            return Done
+        }
+    }
+}`, 'keys = a', r => clean(r) && texts(r) === 'nichts da,Taste 30' && r.halted === null);
+t('interrupt: a full queue loses events and says so', IRQ + `
+function main() uses Port(0x60), Interrupt, Console {
+    var n = 0
+    forever {
+        n = n + 1
+        if n == 90 {
+            Console.print(Interrupt.lost())
+            return Done
+        }
+    }
+}`, 'ticks = 70', r => clean(r) && r.output[0].text === '6' && /6 Ereignisse verloren: Die Warteschlange fasst 64/.test(r.output[1].text));
 t('interrupt: main is the ceiling', IRQ + `
-function main() uses Port(0x3F8) { forever { } }`, '', r => one(r, /on_key behandelt Interrupt\(33\) und braucht Port\(0x60\)\. main nennt dieses Recht nicht/));
-t('interrupt: unknown number, none delivered without forever', IRQ + `
-function main() uses Port(0x60), Port(0x3F8) { }`, 'interrupts = 7 33', r => clean(r) && /2 Unterbrechungen nicht zugestellt/.test(r.output[0].text));
+function main() uses Interrupt { forever { let ev = Interrupt.wait() } }`, '', r => one(r, /on_key behandelt Interrupt\(33\) und braucht Port\(0x60\)\. main nennt dieses Recht nicht/));
+t('interrupt: nothing fired when the program ends first', IRQ + `
+function main() uses Port(0x60) { }`, 'interrupts = 7 33', r => clean(r) && /2 Unterbrechungen nicht ausgelöst/.test(r.output[0].text));
+t('interrupt: fetching needs the right and a handler', `latch 1
+function main() { let ev = Interrupt.wait() }`, '', r => r.errors.length === 2 && has(r, /main braucht das Recht Interrupt/) && has(r, /Es fehlt eine Funktion mit handles Interrupt\(n\)/));
 t('interrupt: no handler', `latch 1
 function main() { forever { } }`, 'interrupts = 7', r => clean(r) && /Unterbrechung 7: keine Funktion behandelt sie/.test(r.output[0].text));
 t('interrupt: rules', `latch 1
-function a(n: Int) -> Int handles Interrupt(32) { return n }
-function b() handles Interrupt(32) { }
-function c() handles Interrupt(300) { }
-function main() { }`, '', r => r.errors.length === 4 && has(r, /hat deshalb keine Parameter/) && has(r, /gibt deshalb nichts zurück/) && has(r, /Interrupt\(32\) wird schon von a behandelt/) && has(r, /Nummern 0 bis 255/));
+enum Event { Tick }
+enum Other { Tock }
+function a(n: Int) -> Event handles Interrupt(32) { return Tick }
+function b() -> Event handles Interrupt(32) { return Tick }
+function c() -> Event handles Interrupt(300) { return Tick }
+function d() handles Interrupt(40) { }
+function e() -> Other handles Interrupt(41) { return Tock }
+function f() -> Int handles Interrupt(42) { return 1 }
+function g() -> Event fails Other handles Interrupt(43) { return Tick }
+function h() -> Event handles Interrupt(44) uses Interrupt { return Interrupt.wait() }
+function main() uses Interrupt { }`, '', r => r.errors.length === 8 && has(r, /hat deshalb keine Parameter/) && has(r, /Interrupt\(32\) wird schon von a behandelt/) && has(r, /Nummern 0 bis 255/)
+  && has(r, /Im Kopf fehlt der Ergebnistyp/) && has(r, /melden denselben Ereignistyp\. a meldet Event, e meldet Other/) && has(r, /ist eine Aufzählung \(enum\), vorhanden ist Int/)
+  && has(r, /kann nicht scheitern/) && has(r, /holt selbst keine Ereignisse ab/));
 t('interrupt: handles comes before uses', `latch 1
-function a() uses Cpu handles Interrupt(32) { }
+function a() -> Done uses Cpu handles Interrupt(32) { }
 function main() { }`, '', r => one(r, /Reihenfolge im Funktionskopf ist fest: handles, uses/));
 
 const TOG = `latch 1
@@ -1161,6 +1220,22 @@ function main() { }`, '', r => r.errors.length === 2 && /Modulnamen beginnen mit
 t('public: only before declarations', `latch 1
 public test "x" { return true }
 function main() { }`, '', r => one(r, /Nach public folgt type, enum, resource, const oder function/));
+
+/* ---------- Aufgabe 3: der Kern aus kernel/ ---------- */
+const KDIR = __dirname + '/../kernel/';
+const KMODS = {};
+for (const f of require('fs').readdirSync(KDIR)) if (f !== 'main.latch') KMODS[f.replace('.latch', '')] = require('fs').readFileSync(KDIR + f, 'utf8');
+const KMAIN = require('fs').readFileSync(KDIR + 'main.latch', 'utf8');
+const serial = r => r.output.filter(o => o.kind === 'serial').map(o => o.text.split(' ')[0]).join();
+t('kernel: screen, keyboard, pages and scheduler in one loop', KMAIN, 'keys = hallo latch\nticks = 7', r => clean(r) && r.warnings.length === 0
+  && r.screen.join('|') === 'Latch OS 0.1|hallo latch' && serial(r) === 'Kern,editor,backup,uhr,editor,backup,backup'
+  && r.output.filter(o => o.kind === 'asm').length === 6 && /Interrupt\.wait/.test(r.halted) && r.tests.length === 9 && r.tests.every(x => x.ok)
+  && r.report.modules.join() === 'Screen,Keyboard,Pages,Sched' && r.report.forever.length === 1 && r.report.interrupts.length === 2
+  && r.report.program.join(' ') === 'Memory(0xB8000..0xB8F9F) Port(0x60) Port(0x3F8) Cpu Interrupt', KMODS);
+t('kernel: ticks only, pages come back', KMAIN, 'ticks = 3', r => clean(r) && r.screen.length === 1 && serial(r) === 'Kern,editor,backup,uhr' && r.output.some(o => /uhr auf Seite 2/.test(o.text)), KMODS);
+t('kernel: broken keyboard is an event, not a crash', KMAIN, 'interrupts = 33 32\nport 0x60 = kaputt', r => clean(r) && serial(r) === 'Kern,Tastatur,editor', KMODS);
+t('kernel: lines fit a phone', KMAIN, '', r => Object.values(KMODS).concat([KMAIN]).join('\n').split('\n').every(l => l.length <= 44), KMODS);
+t('kernel: a module without its right is rejected', KMAIN.replace('Port(0x60), Port(0x3F8),', 'Port(0x3F8),'), '', r => one(r, /on_key behandelt Interrupt\(33\) und braucht Port\(0x60\)/), KMODS);
 
 let failed = 0;
 for (const c of cases) {

@@ -130,7 +130,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 <body>
 <div class="page">
   <header>
-    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.8</span></div>
+    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.9</span></div>
     <p class="lede">Latch-Code schreiben, prüfen und ausführen. Der Prüfer zeigt, was das Programm darf, und lehnt ab, was ungeprüfte Daten oder Geheimnisse falsch verwendet.</p>
   </header>
 
@@ -154,7 +154,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       <details class="panel" id="world-panel">
         <summary>Außenwelt (simuliert)</summary>
         <div class="panel-body">
-          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>file name = down</code>, <code>mail = down</code>, <code>env NAME = wert</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>, <code>interrupts = 33 33</code>, <code>forever = 100</code> (Durchläufe, bis der Prüfstand anhält), <code>foreign funktion = wert</code>.</p>
+          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>file name = down</code>, <code>mail = down</code>, <code>env NAME = wert</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>, <code>interrupts = 33 33</code>, <code>ticks = 6</code> (Uhr, Interrupt 32), <code>forever = 100</code> (Durchläufe, bis der Prüfstand anhält), <code>foreign funktion = wert</code>.</p>
           <textarea id="world" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Simulierte Außenwelt"></textarea>
         </div>
       </details>
@@ -208,7 +208,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li>Namen: Typen, Varianten und Konstanten beginnen groß, Funktionen, Variablen, Parameter und Felder klein.</li>
             <li>Rechte kommen aus dem festen Katalog: <code>Net</code>, <code>File</code>, <code>Clock</code>, <code>Random</code>, <code>Env</code>, <code>Process</code>, <code>Console</code>, <code>Memory</code>, <code>Port</code>, <code>Cpu</code>, <code>Tasks</code>, <code>Interrupt</code>.</li>
             <li>Module: Jede Datei ist ein Modul. Von außen ist nur sichtbar, was <code>public</code> ist. Öffentliche Funktionen brauchen einen Vertrag. <code>destroy</code> geht nur im Modul der Ressource.</li>
-            <li><code>handles Interrupt(n)</code>: keine Parameter, kein Ergebnis, eine Funktion je Nummer. Die Rechte von <code>main</code> sind auch für diese Funktionen die Obergrenze.</li>
+            <li><code>handles Interrupt(n)</code>: keine Parameter, eine Funktion je Nummer. Das Ergebnis ist ein Ereignis, bei allen dieselbe Aufzählung. <code>main</code> holt es mit <code>Interrupt.wait()</code> oder <code>Interrupt.next()</code> ab und braucht dafür <code>uses Interrupt</code>. Die Rechte von <code>main</code> sind auch für diese Funktionen die Obergrenze.</li>
             <li><code>together</code> verlangt <code>uses Tasks</code>. Die Zeilen sehen einander nicht und teilen nichts, was eine von ihnen verändert.</li>
             <li><code>foreign function</code> hat keinen Rumpf, verlangt eine Annahme und steht im Bericht als ungeprüft.</li>
             <li><code>const</code> ist ein fester, offener Wert. <code>test</code> ist rein und endet mit einem Wahrheitswert. <code>with</code> ändert nur die Kopie eines Datensatzes.</li>
@@ -219,8 +219,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
           <p class="sub">Noch vereinfacht</p>
           <ul>
             <li>Verträge (<code>requires</code>, <code>ensures</code> mit <code>old</code>) sowie <code>invariant</code> und <code>decreases</code> werden beim Ausführen geprüft, nicht bewiesen. Eine <code>while</code>-Schleife ohne <code>decreases</code> gibt nur eine Warnung.</li>
-            <li><code>forever</code> hält der Prüfstand an: nach 100 Durchläufen oder wenn die Außenwelt keine Unterbrechung mehr liefert. Echte Hardware liefe weiter.</li>
-            <li>Unterbrechungen kommen nur zwischen zwei Durchläufen von <code>forever</code> an, nie mitten in einer Funktion. Jede Taste aus <code>keys</code> löst Interrupt 33 aus.</li>
+            <li><code>forever</code> hält der Prüfstand an: nach 100 Durchläufen, oder wenn <code>Interrupt.wait()</code> wartet und die Außenwelt nichts mehr liefert. Echte Hardware liefe weiter.</li>
+            <li>Unterbrechungen kommen nur zu Beginn eines Durchlaufs von <code>forever</code> und in <code>Interrupt.wait()</code> an, nie mitten in einer Funktion. Jede Taste aus <code>keys</code> löst Interrupt 33 aus, <code>ticks</code> die Uhr mit Interrupt 32. Die Warteschlange fasst 64 Ereignisse, was nicht hineinpasst, geht verloren und wird gezählt (<code>Interrupt.lost()</code>).</li>
             <li><code>together</code> führt die Zeilen nacheinander aus, nicht wirklich gleichzeitig.</li>
             <li>Fremder Code läuft nicht. Das Ergebnis einer <code>foreign function</code> kommt aus der Außenwelt und wird gegen den erklärten Typ geprüft.</li>
             <li><code>Bits</code> rechnet nur mit Zahlen ab 0 und bis 2<sup>53</sup>.</li>
@@ -244,6 +244,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li><code>Console.print(x)</code>, <code>Console.read("feld")</code>, <code>Env.get("NAME")</code>, <code>Net.get("host", pfad)</code></li>
             <li><code>File.append("name", satz)</code>, <code>File.find("name", "feld", wert)</code>, <code>File.count("name")</code></li>
             <li><code>Bits.and(a, b)</code>, <code>Bits.or(a, b)</code>, <code>Bits.xor(a, b)</code>, <code>Bits.shift_left(a, n)</code>, <code>Bits.shift_right(a, n)</code>, <code>Bits.test(a, bit)</code></li>
+            <li><code>Interrupt.wait()</code>, <code>Interrupt.next()</code>, <code>Interrupt.lost()</code></li>
             <li><code>Mail.send("host", an, betreff, text)</code>, <code>Clock.now()</code>, <code>Random.int(a, b)</code></li>
             <li><code>Kem.generate()</code>, <code>Crypto.encrypt(key, text)</code>, <code>Crypto.public_key(key)</code>, <code>Text.contains(text, teil)</code>, <code>Text.bytes(text)</code>, <code>List.at(liste, stelle)</code>, <code>Table.fill(anzahl, wert)</code></li>
             <li><code>Memory.write(adresse, byte)</code>, <code>Memory.read(adresse)</code>, <code>Port.write(port, byte)</code>, <code>Port.read(port)</code></li>
@@ -973,6 +974,9 @@ var BUILTINS = {
   'Text.bytes': { right: null, n: 1, ret: 'clean', p: ['Text'], r: 'Ints' },
   'List.at': { right: null, n: 2, ret: 'clean', fallible: 'Missing', p: ['List', 'Int'], r: 'Elem' },
   'Table.fill': { right: null, n: 2, ret: 'clean', p: ['Int', 'Any'], r: 'Fill' },
+  'Interrupt.next': { right: 'Interrupt', n: 0, ret: 'clean', fallible: 'Missing', p: [], r: 'Event' },
+  'Interrupt.wait': { right: 'Interrupt', n: 0, ret: 'clean', p: [], r: 'Event' },
+  'Interrupt.lost': { right: 'Interrupt', n: 0, ret: 'clean', p: [], r: 'Int' },
   'Bits.and': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
   'Bits.or': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
   'Bits.xor': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
@@ -986,6 +990,7 @@ var BUILTINS = {
 };
 var VGA_BASE = 0xB8000, VGA_COLS = 80, VGA_ROWS = 25, VGA_END = VGA_BASE + VGA_COLS * VGA_ROWS * 2 - 1;
 function hex(n) { return '0x' + n.toString(16).toUpperCase(); }
+var EVENT_QUEUE = 64;
 var CATALOG = ['Net', 'File', 'Clock', 'Random', 'Env', 'Process', 'Console', 'Memory', 'Port', 'Cpu', 'Tasks', 'Interrupt'];
 var LIBMODS = {};
 Object.keys(BUILTINS).forEach(function (q) { LIBMODS[q.split('.')[0]] = true; });
@@ -1161,7 +1166,7 @@ function checkProgram(prog) {
   }
   function warn(line, msg) { var o = { line: line, msg: msg }; if (curMod) o.module = curMod; warnings.push(o); }
   function each(list, fn) { list.forEach(function (d) { curMod = d.module || ''; fn(d); }); curMod = ''; }
-  var types = {}, variants = {}, funcs = {}, enums = {}, consts = {}, handlers = {}, mainUsed = null;
+  var types = {}, variants = {}, funcs = {}, enums = {}, consts = {}, handlers = {}, mainUsed = null, eventT = null, eventBy = '';
   BUILTIN_ERRORS.forEach(function (e) { variants[e] = { enumName: e, fields: [], ftypesT: [] }; enums[e] = [e]; });
   variants.Done = { enumName: 'Done', fields: [], ftypesT: [] };
   enums.Done = ['Done'];
@@ -1350,7 +1355,9 @@ function checkProgram(prog) {
       var hn = f.handles.n;
       if (hn > 255) err(f.handles.line, 'Unterbrechungen haben die Nummern 0 bis 255, vorhanden ist ' + hn + '.');
       if (f.params.length) err(f.line, f.name + ' behandelt eine Unterbrechung und hat deshalb keine Parameter. Niemand ruft sie mit Werten auf.');
-      if (f.ret) err(f.line, f.name + ' behandelt eine Unterbrechung und gibt deshalb nichts zurück. Es gibt keinen Aufrufer, der das Ergebnis bekäme.');
+      if (!f.ret) err(f.line, f.name + ' behandelt eine Unterbrechung und meldet sie als Ereignis. Im Kopf fehlt der Ergebnistyp, zum Beispiel: -> Event');
+      if (f.errType) err(f.line, f.name + ' behandelt eine Unterbrechung und kann nicht scheitern, weil niemand den Fehler auffängt. Den Fehlerfall als eigene Variante des Ereignisses melden.');
+      if (f.retTaint !== 'clean') err(f.line, 'Das Ereignis von ' + f.name + ' ist ein geprüfter, offener Wert, weder unchecked noch secret.');
       if (f.assembly || f.foreign) err(f.line, 'handles steht nur an Funktionen mit Latch-Rumpf.');
       if (handlers[hn]) err(f.handles.line, 'Interrupt(' + hn + ') wird schon von ' + handlers[hn].name + ' behandelt. Jede Unterbrechung hat genau eine Funktion.');
       else handlers[hn] = f;
@@ -1376,6 +1383,11 @@ function checkProgram(prog) {
   each(prog.funcs, function (f) {
     f.paramT = f.params.map(function (p) { lowerName(p.name, 'Parameter', p.line); return resolve(p.tref, p.line); });
     f.retT = f.ret ? resolve(f.retRef, f.line) : T_DONE;
+    if (f.handles && f.ret && f.retT) {
+      if (f.retT.a || !enums[f.retT.n] || f.retT.n === 'Done') err(f.line, 'Das Ereignis von ' + f.name + ' ist eine Aufzählung (enum), vorhanden ist ' + tstr(f.retT) + '.');
+      else if (!eventT) { eventT = f.retT; eventBy = f.name; }
+      else if (!sameT(eventT, f.retT)) err(f.line, 'Alle Funktionen mit handles melden denselben Ereignistyp. ' + eventBy + ' meldet ' + tstr(eventT) + ', ' + f.name + ' meldet ' + tstr(f.retT) + '.');
+    }
   });
   function checkable(name, line, depth) {
     if (BASE_TYPES.indexOf(name) >= 0) return true;
@@ -1590,7 +1602,11 @@ function checkProgram(prog) {
           var addr = fold(e.args[0]);
           need(ctx, addr === null ? { name: b.right } : { name: b.right, lo: addr, hi: addr }, e.line, q);
         } else if (b.right) need(ctx, { name: b.right, arg: b.lit ? arg : null }, e.line, q);
-        var bt = b.r === 'Elem' ? (argT[0] && argT[0].a ? argT[0].a[0] : null)
+        if (e.mod === 'Interrupt') {
+          if (ctx.fn && ctx.fn.handles) err(e.line, 'Eine Funktion mit handles holt selbst keine Ereignisse ab. Das tut die Hauptschleife in main.');
+          if (b.r === 'Event' && !eventT) err(e.line, q + ' liefert Ereignisse, aber keine Funktion meldet welche. Es fehlt eine Funktion mit handles Interrupt(n).');
+        }
+        var bt = b.r === 'Event' ? eventT : b.r === 'Elem' ? (argT[0] && argT[0].a ? argT[0].a[0] : null)
           : b.r === 'Fill' ? T('Table', [argT[1] || null, e.args[0] ? fold(e.args[0]) : null]) : LIB[b.r];
         return R(b.ret, b.fallible || null, null, null, null, bt);
       }
@@ -2033,7 +2049,7 @@ function checkProgram(prog) {
       if (!used[i]) warn(d.line, f.name + ' verlangt ' + fmtRight(d) + ', nutzt es aber nicht. Rechte so knapp wie möglich halten.');
     });
     ctx.forever.forEach(function (ln) { report.forever.push({ name: f.name, line: ln, module: f.module || '' }); });
-    if (f.handles) report.interrupts.push({ n: f.handles.n, name: f.name, module: f.module || '' });
+    if (f.handles) report.interrupts.push({ n: f.handles.n, name: f.name, module: f.module || '', event: f.ret || '' });
     report.functions.push({
       name: f.name, line: f.line, module: f.module || '', assembly: false, foreign: false, handles: f.handles ? f.handles.n : null, forever: ctx.forever,
       rights: f.rights.map(fmtRight),
@@ -2103,7 +2119,7 @@ function RuntimeFail(msg, line) { this.message = msg; this.line = line || 0; }
 function HaltSignal(msg) { this.message = msg; }
 
 function parseWorld(text) {
-  var w = { input: {}, net: {}, port: {}, env: {}, foreign: {}, fileDown: {}, mailDown: false, keys: null, interrupts: null, rounds: 100 };
+  var w = { input: {}, net: {}, port: {}, env: {}, foreign: {}, fileDown: {}, mailDown: false, keys: null, interrupts: null, rounds: 100, ticks: 0 };
   (text || '').split('\n').forEach(function (raw) {
     var line = raw.trim();
     if (!line || line[0] === '#') return;
@@ -2121,6 +2137,7 @@ function parseWorld(text) {
     else if ((m = /^env\s+(\S+)\s*=\s?(.*)$/.exec(line))) w.env[m[1]] = m[2];
     else if ((m = /^foreign\s+(\S+)\s*=\s?(.*)$/.exec(line))) w.foreign[m[1]] = m[2];
     else if ((m = /^interrupts\s*=\s*(.*)$/.exec(line))) w.interrupts = m[1].split(/[\s,]+/).filter(Boolean).map(Number).filter(function (n) { return n >= 0 && n <= 255; });
+    else if ((m = /^ticks\s*=\s*(\d+)$/.exec(line))) w.ticks = Math.min(parseInt(m[1], 10), 1000);
     else if ((m = /^forever\s*=\s*(\d+)$/.exec(line))) w.rounds = Math.min(parseInt(m[1], 10), 10000);
     else if (/^mail\s*=\s*down$/.exec(line)) w.mailDown = true;
   });
@@ -2173,8 +2190,18 @@ function execute(info, worldText, proofs, lenient) {
   var world = parseWorld(worldText), out = [], tables = {}, steps = 0, depth = 0;
   var mem = {}, serial = '', stack = [], memOther = 0, screenUsed = false, globals = {};
   var handlers = info.handlers || {}, irq = world.interrupts;
-  /* Nachbau: Jede Taste löst die Unterbrechung 33 aus (IRQ 1 der Tastatur), einmal beim Drücken, einmal beim Loslassen. */
-  if (!irq && world.keys && handlers[33]) irq = world.keys.map(function () { return 33; });
+  var events = [], lost = 0;
+  /* Nachbau: Jede Taste löst die Unterbrechung 33 aus (IRQ 1 der Tastatur), einmal beim Drücken, einmal beim Loslassen.
+     "ticks = n" lässt die Uhr n-mal die Unterbrechung 32 auslösen, verteilt zwischen den Tasten. */
+  if (!irq && ((world.keys && handlers[33]) || (world.ticks && handlers[32]))) {
+    var left = handlers[32] ? world.ticks : 0;
+    irq = [];
+    (handlers[33] && world.keys || []).forEach(function (k, i) {
+      irq.push(33);
+      if (i % 2 === 1 && left > 0) { irq.push(32); left--; }
+    });
+    for (; left > 0; left--) irq.push(32);
+  }
   function snap(v) {
     if (Array.isArray(v)) return v.map(snap);
     if (isRecord(v)) { var f = {}; v.order.forEach(function (n) { f[n] = snap(v.f[n]); }); return { rec: v.rec, order: v.order, f: f }; }
@@ -2250,6 +2277,14 @@ function execute(info, worldText, proofs, lenient) {
       case 'Console.print': out.push({ kind: 'out', text: show(args[0]) }); return DONE;
       case 'Console.read': { var k = show(args[0]); return own(world.input, k) ? world.input[k] : ''; }
       case 'Env.get': { var ek = show(args[0]); return own(world.env, ek) ? world.env[ek] : ''; }
+      case 'Interrupt.next': return events.length ? events.shift() : new Err(mkVariant('Missing', 'Missing', [], []));
+      case 'Interrupt.wait':
+        while (!events.length) {
+          if (!irq || !irq.length) throw new HaltSignal('Interrupt.wait() in Zeile ' + line + ': Die Außenwelt liefert keine Unterbrechung mehr. Der Prüfstand hält hier an, echte Hardware würde schlafen.');
+          deliver(irq.shift(), line);
+        }
+        return events.shift();
+      case 'Interrupt.lost': return lost;
       case 'Bits.and': return Number(bits(args[0], line) & bits(args[1], line));
       case 'Bits.or': return Number(bits(args[0], line) | bits(args[1], line));
       case 'Bits.xor': return Number(bits(args[0], line) ^ bits(args[1], line));
@@ -2460,7 +2495,8 @@ function execute(info, worldText, proofs, lenient) {
   function deliver(n, line) {
     var h = handlers[n];
     if (!h) { out.push({ kind: 'irq', text: 'Unterbrechung ' + n + ': keine Funktion behandelt sie, verworfen' }); return; }
-    call(h, [], line);
+    var ev = call(h, [], line);
+    if (events.length >= EVENT_QUEUE) lost++; else events.push(ev);
   }
   function execBlock(stmts, env) {
     var local = child(env);
@@ -2545,10 +2581,8 @@ function execute(info, worldText, proofs, lenient) {
       }
       case 'Forever': {
         for (var round = 0; ; round++) {
-          if (irq) {
-            if (!irq.length) throw new HaltSignal('Keine Unterbrechung mehr in der Außenwelt. Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + (round === 1 ? ' Durchlauf' : ' Durchläufen') + ' an.');
-            deliver(irq.shift(), s.line);
-          } else if (round >= world.rounds) throw new HaltSignal('Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + ' Durchläufen an. Echte Hardware liefe weiter.');
+          if (irq && irq.length) deliver(irq.shift(), s.line);
+          if (round >= world.rounds) throw new HaltSignal('Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + ' Durchläufen an. Echte Hardware liefe weiter.');
           tick(s.line);
           execBlock(s.body, env);
         }
@@ -2621,7 +2655,8 @@ function execute(info, worldText, proofs, lenient) {
   }, funcs.main);
   if (failed && failed.halt) res.halted = failed.msg;
   else if (failed) res.runtimeError = failed;
-  else if (irq && irq.length) out.push({ kind: 'irq', text: irq.length + (irq.length === 1 ? ' Unterbrechung' : ' Unterbrechungen') + ' nicht zugestellt: Das Programm endete, ohne in forever zu warten.' });
+  else if (irq && irq.length) out.push({ kind: 'irq', text: irq.length + (irq.length === 1 ? ' Unterbrechung' : ' Unterbrechungen') + ' nicht ausgelöst: Das Programm endete vorher.' });
+  if (lost) out.push({ kind: 'irq', text: lost + (lost === 1 ? ' Ereignis' : ' Ereignisse') + ' verloren: Die Warteschlange fasst ' + EVENT_QUEUE + ', main hat sie nicht geleert.' });
   if (serial) out.push({ kind: 'serial', text: serial });
   if (memOther) out.push({ kind: 'mem', text: memOther + (memOther === 1 ? ' Byte' : ' Bytes') + ' außerhalb des Bildschirmspeichers geschrieben' });
   if (res.halted) out.push({ kind: 'halt', text: res.halted });
@@ -2731,6 +2766,8 @@ root.Latch = { run: run };
     '    destroy page',
     '}'
   ].join('\n');
+
+  var KERNEL = {"main": "latch 1\nimport Screen\nimport Keyboard\nimport Pages\nimport Sched\n\n// Latch OS: Bildschirm, Tastatur,\n// Seitenverwalter und Planer in einem\n// Programm. Die Hardware meldet sich\n// ueber Unterbrechungen, main holt die\n// Ereignisse in der Hauptschleife ab.\n\nenum Event {\n    Key(code: Keyboard.Scan),\n    Tick,\n    Fault,\n}\n\nfunction on_key() -> Event\n    handles Interrupt(33)\n    uses Port(0x60)\n{\n    let code = Keyboard.read_scan()\n        otherwise return Fault\n    return Key(code)\n}\n\nfunction on_tick() -> Event\n    handles Interrupt(32)\n{\n    return Tick\n}\n\nfunction log(msg: Text)\n    uses Port(0x3F8)\n    assumes \"COM1 serial port at 0x3F8\"\n{\n    for b in Text.bytes(msg) {\n        Port.write(0x3F8, b)\n    }\n    Port.write(0x3F8, 10)\n}\n\n// Eine Zeitscheibe: Seite holen,\n// Aufgabe laufen lassen, Seite zurueck.\n// Ergebnis: die Aufgabe, die dran war.\nfunction slice(\n    change tasks: Table<Sched.Task, 3>,\n    change pool: Pages.Pool,\n    last: Int)\n    -> Int\n    uses Port(0x3F8), Cpu\n    requires last in 0..2\n    ensures result in 0..2\n    ensures pool.free == old(pool.free)\n{\n    let next = Sched.pick(tasks, last)\n    if next < 0 { return last }\n    let page = Pages.alloc(change pool)\n        otherwise return last\n    let name = tasks[next].name\n    log(\"{name} auf Seite {page.frame}\")\n    Sched.step(change tasks, next)\n    Pages.free(change pool, take page)\n    return next\n}\n\n// Eine Taste auf den Bildschirm\nfunction type_key(\n    change cur: Screen.Cursor,\n    code: Keyboard.Scan)\n    uses Memory(0xB8000..0xB8F9F)\n{\n    let ch = Keyboard.decode(code)\n    if ch > 0 {\n        Screen.put(change cur, ch)\n    }\n}\n\nfunction main()\n    uses Memory(0xB8000..0xB8F9F),\n         Port(0x60), Port(0x3F8),\n         Cpu, Interrupt\n{\n    var cur = Screen.start()\n    Screen.print(change cur, \"Latch OS 0.1\")\n    Screen.newline(change cur)\n\n    var pool = Pages.pool(16)\n    var tasks = [\n        Sched.task(\"editor\", 2),\n        Sched.task(\"backup\", 3),\n        Sched.task(\"uhr\", 1),\n    ]\n    var last = 2\n    log(\"Kern bereit\")\n\n    forever {\n        let ev = Interrupt.wait()\n        match ev {\n            Key(code) -> {\n                type_key(change cur, code)\n            }\n            Tick -> {\n                last = slice(change tasks,\n                    change pool, last)\n            }\n            Fault -> {\n                log(\"Tastatur gestoert\")\n            }\n        }\n    }\n}", "modules": {"Keyboard": "latch 1\n\n// Tastatur: PS/2, Tastencodes Satz 1\n\npublic type Scan = Int where it in 0..255\n\npublic enum KbdError { BadDevice }\n\npublic function read_scan()\n    -> Scan fails KbdError\n    uses Port(0x60)\n    ensures result in 0..255\n    assumes \"PS/2 data port at 0x60\"\n{\n    let code = check Port.read(0x60)\n        as Scan\n        otherwise return BadDevice\n    return code\n}\n\nfunction pick(keys: Text, i: Int)\n    -> Int\n{\n    return List.at(Text.bytes(keys), i)\n        otherwise return 0\n}\n\n// Tastencode -> Zeichen, 0 = keines.\n// Bit 7 gesetzt: Taste losgelassen.\npublic function decode(code: Scan) -> Int\n    ensures result in 0..127\n{\n    if Bits.test(code, 7) { return 0 }\n    if code == 0x39 { return 32 }\n    if code in 0x10..0x19 {\n        return pick(\"qwertyuiop\",\n                    code - 0x10)\n    }\n    if code in 0x1E..0x26 {\n        return pick(\"asdfghjkl\",\n                    code - 0x1E)\n    }\n    if code in 0x2C..0x32 {\n        return pick(\"zxcvbnm\",\n                    code - 0x2C)\n    }\n    return 0\n}\n\ntest \"a\" { return decode(0x1E) == 97 }\n\ntest \"Leertaste\" {\n    return decode(0x39) == 32\n}\n\ntest \"losgelassen zaehlt nicht\" {\n    return decode(0x9E) == 0\n}", "Pages": "latch 1\n\n// Seitenverwalter: Jede Seite gibt es\n// genau einmal. Wer sie holt, muss sie\n// zurueckgeben.\n\npublic resource Page { frame: Int }\n\npublic type Pool = {\n    next: Int,\n    free: Int,\n}\n\npublic enum MemError { OutOfMemory }\n\npublic function pool(frames: Int) -> Pool\n    requires frames >= 0\n    ensures result.free == frames\n{\n    return Pool { next: 0, free: frames }\n}\n\npublic function alloc(change pool: Pool)\n    -> Page fails MemError\n    ensures pool.free\n        == old(pool.free) - 1\n{\n    if pool.free == 0 {\n        return OutOfMemory\n    }\n    let frame = pool.next\n    pool.next = pool.next + 1\n    pool.free = pool.free - 1\n    return Page { frame }\n}\n\npublic function free(change pool: Pool,\n                     take page: Page)\n    ensures pool.free\n        == old(pool.free) + 1\n{\n    pool.free = pool.free + 1\n    destroy page\n}\n\ntest \"holen und zurueckgeben\" {\n    var p = pool(2)\n    let a = alloc(change p)\n        otherwise return false\n    free(change p, take a)\n    return p.free == 2\n}\n\ntest \"leer heisst leer\" {\n    var p = pool(0)\n    let a = alloc(change p)\n        otherwise return true\n    free(change p, take a)\n    return false\n}", "Sched": "latch 1\n\n// Planer: reihum, drei Aufgaben\n\npublic enum State { Ready, Finished }\n\npublic type Task = {\n    name: Text,\n    left: Int,\n    state: State,\n}\n\n// Der Wechsel selbst ist Assembler:\nassembly function switch_to(id: Int)\n    uses Cpu\n    assumes \"saves and loads all registers\"\n\npublic function task(name: Text,\n                     left: Int)\n    -> Task\n    requires left > 0\n    ensures result.left == left\n{\n    return Task { name, left,\n                  state: Ready }\n}\n\n// Die naechste bereite Aufgabe nach\n// last, -1 wenn keine mehr wartet\npublic function pick(\n    tasks: Table<Task, 3>, last: Int)\n    -> Int\n    requires last in 0..2\n    ensures result in -1..2\n{\n    for k in 1..3 {\n        let i = (last + k) % 3\n        let t = tasks[i]\n        if t.state == Ready { return i }\n    }\n    return -1\n}\n\n// Eine Zeitscheibe fuer Aufgabe i\npublic function step(\n    change tasks: Table<Task, 3>, i: Int)\n    uses Cpu\n    requires i in 0..2\n    requires tasks[i].left > 0\n    ensures tasks[i].left\n        == old(tasks[i].left) - 1\n{\n    switch_to(i)\n    let t = tasks[i]\n    tasks[i].left = t.left - 1\n    if t.left == 1 {\n        tasks[i].state = Finished\n    }\n}\n\ntest \"reihum\" {\n    let ts = [task(\"a\", 1),\n              task(\"b\", 1),\n              task(\"c\", 1)]\n    return pick(ts, 0) == 1\n        and pick(ts, 2) == 0\n}", "Screen": "latch 1\n\n// Bildschirm: VGA-Text, 80 x 25 Zeichen\n\npublic const WIDTH = 80\npublic const HEIGHT = 25\nconst VGA = 0xB8000\n\npublic type Cursor = {\n    row: Int,\n    col: Int,\n}\n\npublic function start() -> Cursor\n    ensures result.row == 0\n    ensures result.col == 0\n{\n    return Cursor { row: 0, col: 0 }\n}\n\nfunction cell(cur: Cursor) -> Int\n    requires cur.row in 0..HEIGHT - 1\n    requires cur.col in 0..WIDTH - 1\n{\n    return VGA\n        + (cur.row * WIDTH + cur.col) * 2\n}\n\npublic function newline(change cur: Cursor)\n    ensures cur.col == 0\n{\n    cur.col = 0\n    cur.row = cur.row + 1\n    if cur.row == HEIGHT { cur.row = 0 }\n}\n\npublic function put(change cur: Cursor,\n                    ch: Int)\n    uses Memory(0xB8000..0xB8F9F)\n    requires ch in 0..255\n    ensures cur.col in 0..WIDTH - 1\n    assumes \"VGA text buffer at 0xB8000\"\n{\n    Memory.write(cell(cur), ch)\n    Memory.write(cell(cur) + 1, 0x0F)\n    cur.col = cur.col + 1\n    if cur.col == WIDTH {\n        newline(change cur)\n    }\n}\n\npublic function print(change cur: Cursor,\n                      msg: Text)\n    uses Memory(0xB8000..0xB8F9F)\n    ensures cur.row in 0..HEIGHT - 1\n{\n    for b in Text.bytes(msg) {\n        put(change cur, b)\n    }\n}\n\ntest \"erste Zelle\" {\n    let c = Cursor { row: 0, col: 0 }\n    return cell(c) == VGA\n}\n\ntest \"letzte Zelle\" {\n    let c = Cursor { row: 24, col: 79 }\n    return cell(c) == 0xB8F9E\n}\n\ntest \"Zeilenende springt um\" {\n    var c = Cursor { row: 24, col: 5 }\n    newline(change c)\n    return c.row == 0 and c.col == 0\n}"}};
 
   var EXAMPLES = [
     { title: 'Anmeldung (läuft durch)', world: SIGNUP_WORLD, code: [
@@ -3076,6 +3113,7 @@ root.Latch = { run: run };
       '    log("alle Aufgaben fertig")',
       '}'
     ].join('\n') },
+    { title: 'Latch OS: alle Bausteine in einem Kern', world: 'keys = hallo latch\nticks = 7', code: KERNEL.main, modules: KERNEL.modules },
     { title: 'Region und match', world: '', code: [
       'latch 1', '',
       'type Buffer = { size: Int, used: Int }',
@@ -3203,35 +3241,51 @@ root.Latch = { run: run };
       '',
       'type Byte = Int where it in 0..255',
       '',
-      'const DATA = 0x60',
-      'const COM1 = 0x3F8',
+      'enum Event {',
+      '    Key(code: Byte),',
+      '    Released,',
+      '    Fault,',
+      '}',
       '',
       '// Die Tastatur meldet sich selbst,',
-      '// niemand ruft on_key auf.',
-      'function on_key()',
+      '// niemand ruft on_key auf. Das',
+      '// Ergebnis landet in der Warteschlange.',
+      'function on_key() -> Event',
       '    handles Interrupt(33)',
-      '    uses Port(0x60), Port(0x3F8)',
+      '    uses Port(0x60)',
       '    assumes "PS/2 data port at 0x60"',
       '{',
-      '    let code = check Port.read(DATA)',
+      '    let code = check Port.read(0x60)',
       '        as Byte',
-      '        otherwise return Done',
+      '        otherwise return Fault',
       '    // Bit 7 gesetzt: Taste losgelassen',
-      '    if Bits.test(code, 7) { return }',
-      '    for b in Text.bytes("{code} ") {',
-      '        Port.write(COM1, b)',
+      '    if Bits.test(code, 7) {',
+      '        return Released',
       '    }',
+      '    return Key(code)',
       '}',
       '',
       'function main()',
-      '    uses Port(0x60), Port(0x3F8)',
+      '    uses Port(0x60), Interrupt, Console',
       '{',
-      '    for b in Text.bytes("bereit") {',
-      '        Port.write(COM1, b)',
+      '    // Der Zustand bleibt in main:',
+      '    var count = 0',
+      '    Console.print("bereit")',
+      '    forever {',
+      '        // schläft, bis etwas kommt',
+      '        let ev = Interrupt.wait()',
+      '        match ev {',
+      '            Key(code) -> {',
+      '                count = count + 1',
+      '                Console.print(',
+      '                    "Taste {count}: {code}")',
+      '            }',
+      '            Released -> { }',
+      '            Fault -> {',
+      '                Console.print("gestört")',
+      '            }',
+      '        }',
       '    }',
-      '    Port.write(COM1, 10)',
-      '    // Der Kern wartet für immer:',
-      '    forever { }',
       '}'
     ].join('\n') },
     { title: 'Verträge: old, invariant, test', world: '', code: [
@@ -3661,7 +3715,7 @@ root.Latch = { run: run };
       rep.appendChild(box);
     }
     section('Module', r.report.modules || []);
-    section('Unterbrechungen', (r.report.interrupts || []).map(function (i) { return 'Interrupt(' + i.n + ') → ' + i.name; }));
+    section('Unterbrechungen', (r.report.interrupts || []).map(function (i) { return 'Interrupt(' + i.n + ') → ' + i.name + ' meldet ' + i.event; }));
     section('Endlosschleifen', (r.report.forever || []).map(function (f) { return f.name + ', Zeile ' + f.line; }));
     section('Tests', (r.report.tests || []).map(function (t) { return (t.module ? t.module + ': ' : '') + t.name; }));
     rep.appendChild(el('p', 'sub', 'Funktionen'));
