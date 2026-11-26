@@ -8,9 +8,14 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 
 ## Aufbau
 
-- `src/latch.js`: Lexer, Parser, statischer Prüfer, Interpreter, Bericht. Eine Datei, keine Abhängigkeiten.
+- `src/latch.js`: Lexer, Parser, statischer Prüfer (Rechte, Markierungen, Ressourcen, Typen), Interpreter,
+  Bericht. Eine Datei, keine Abhängigkeiten.
 - `src/ui.html`: Oberfläche des Prüfstands mit den Beispielen. `/*__LATCH__*/` wird beim Bauen ersetzt.
-- `build.py`: erzeugt `site/index.html`.
+  Ein Beispiel kann weitere Dateien mitbringen: `modules: { Screen: '...' }`.
+- `Latch.run(quelltext, aussenwelt, module)`: `module` ist `{ Modulname: Quelltext }`. Importierte Namen
+  heißen intern `Screen.put`, danach arbeiten Prüfer und Interpreter auf einem einzigen Programm.
+- `kernel/`: der Kern als Module, `main.latch` ist der Einstieg. Zeilen höchstens rund 40 Zeichen.
+- `build.py`: erzeugt `site/index.html`, setzt dabei `src/latch.js` und die Dateien aus `kernel/` ein.
 - `tests/run.js`: Testprogramme mit erwartetem Ergebnis. `tests/examples.js`: lässt alle Beispiele laufen.
 
 ## Regeln für die Arbeit
@@ -24,24 +29,32 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 
 ## Bekannte Lücken des Prototyps
 
-- Keine Typprüfung: Parametertypen werden nicht mit Argumenten abgeglichen.
+- Typprüfung: Der einzige Beweis für eingeschränkte Typen ist das Nachrechnen fester Werte. Tabellengrößen
+  werden nur verglichen, wenn sie als feste Zahl dastehen. `Map<K, V>` ist nur als Typ bekannt.
+  `secret` und `unchecked` an Feldern werden gelesen, aber nicht ausgewertet. Typisierte Texte fehlen.
 - Verträge, Tabellengrenzen und berechnete Hardware-Adressen werden zur Laufzeit geprüft, nicht bewiesen.
   Das widerspricht der Regel "Unbewiesenes läuft nicht" und ist nur im Prototyp so.
-- Ressourcen können nicht in Feldern, Listen, Tabellen oder Varianten stehen.
-- Viele entschiedene Wörter sind nur reserviert und noch ohne Funktion (Aufgabe 2).
+- Ressourcen können nicht in Feldern, Listen, Tabellen oder Varianten stehen. Im Kern bekommt deshalb jede
+  Zeitscheibe ihre Seite und gibt sie gleich zurück, statt dass eine Aufgabe ihre Seiten behält.
+- `invariant`, `decreases` und `old` werden wie alle Verträge nur zur Laufzeit geprüft.
+- `forever` hält der Prüfstand an (100 Durchläufe, oder `Interrupt.wait()` bekommt nichts mehr). Unterbrechungen
+  kommen nur zu Beginn eines Durchlaufs und in `Interrupt.wait()` an, nie mitten in einer Funktion. `together` läuft nacheinander. `foreign`-Ergebnisse kommen aus der Außenwelt.
+- `hardened`, `break`, `continue`, `module` und `async` sind nur reserviert. Typisierte Texte fehlen.
+- Rechte nehmen nur feste Zahlen und Texte, keine Konstanten: `uses Memory(0xB8000..0xB8F9F)`.
+- Wer ein Modul mit Fehlern beim Verbinden importiert (unbekannter oder privater Name), sieht nur diese Fehler.
+  Die übrige Prüfung läuft erst danach.
 - Assembler wird nicht ausgeführt, Hardware ist nachgebaut (VGA-Text ab 0xB8000, COM1 0x3F8, PS/2 0x60/0x64).
 - `List.at` und `Table.fill` sind vorläufige Bibliotheksnamen.
 
 ## Nächste Aufgaben, in dieser Reihenfolge
 
-1. Typprüfung im Prüfer: Parameter, Rückgaben, Felder, Varianten, Fehlertypen. Eingeschränkte Typen
-   (`where`) dürfen nur über `check` oder einen Beweis entstehen. Großschreibung der Namen erzwingen.
-2. Entschiedene Sprachteile, die der Prüfstand nur reserviert hat (siehe `SPEC.md`): Module mit `public`
-   und `import`, `together` mit `uses Tasks`, `foreign function`, `handles Interrupt(n)`, `const`, `test`,
-   `with`, `forever`, `old`, `invariant`, `decreases`, die Bibliothek `Bits`, der feste Katalog der Rechte
-   (`Db` und `Input` in den Beispielen ersetzen).
-3. Die vier Kern-Bausteine (Bildschirm, Tastatur, Seitenverwalter, Planer) zu einem Programm verbinden,
-   mit `forever` als Hauptschleife.
+1. Erledigt: Typprüfung im Prüfer (Parameter, Rückgaben, Felder, Varianten, Fehlertypen, eingeschränkte
+   Typen nur über `check` oder einen festen Wert, Großschreibung). Die Regeln stehen in `SPEC.md` unter "Typprüfung".
+2. Erledigt: Module mit `public` und `import`, `together`, `foreign function`, `handles Interrupt(n)`, `const`,
+   `test`, `with`, `forever`, `old`, `invariant`, `decreases`, die Bibliothek `Bits`, der feste Katalog der
+   Rechte. Die Einzelheiten stehen in `SPEC.md` unter "Einzelheiten der Sprachteile".
+3. Erledigt: `kernel/` verbindet Bildschirm, Tastatur, Seitenverwalter und Planer als Module zu einem Programm.
+   `main.latch` hält den Zustand und holt Ereignisse in `forever` mit `Interrupt.wait()` ab.
 4. Compiler. Vorschlag als erster Schritt: Latch nach freistehendem C übersetzen, mit einem kleinen
    Startcode als Multiboot-Kern in QEMU starten und "Latch OS" auf den echten VGA-Textspeicher schreiben.
    Vorher mit dem Autor klären, ob C als Zwischenschritt in Ordnung ist oder direkt Maschinencode gewünscht ist.

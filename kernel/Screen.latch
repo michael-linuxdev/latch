@@ -1,0 +1,76 @@
+latch 1
+
+// Bildschirm: VGA-Text, 80 x 25 Zeichen
+
+public const WIDTH = 80
+public const HEIGHT = 25
+const VGA = 0xB8000
+
+public type Cursor = {
+    row: Int,
+    col: Int,
+}
+
+public function start() -> Cursor
+    ensures result.row == 0
+    ensures result.col == 0
+{
+    return Cursor { row: 0, col: 0 }
+}
+
+function cell(cur: Cursor) -> Int
+    requires cur.row in 0..HEIGHT - 1
+    requires cur.col in 0..WIDTH - 1
+{
+    return VGA
+        + (cur.row * WIDTH + cur.col) * 2
+}
+
+public function newline(change cur: Cursor)
+    ensures cur.col == 0
+{
+    cur.col = 0
+    cur.row = cur.row + 1
+    if cur.row == HEIGHT { cur.row = 0 }
+}
+
+public function put(change cur: Cursor,
+                    ch: Int)
+    uses Memory(0xB8000..0xB8F9F)
+    requires ch in 0..255
+    ensures cur.col in 0..WIDTH - 1
+    assumes "VGA text buffer at 0xB8000"
+{
+    Memory.write(cell(cur), ch)
+    Memory.write(cell(cur) + 1, 0x0F)
+    cur.col = cur.col + 1
+    if cur.col == WIDTH {
+        newline(change cur)
+    }
+}
+
+public function print(change cur: Cursor,
+                      msg: Text)
+    uses Memory(0xB8000..0xB8F9F)
+    ensures cur.row in 0..HEIGHT - 1
+{
+    for b in Text.bytes(msg) {
+        put(change cur, b)
+    }
+}
+
+test "erste Zelle" {
+    let c = Cursor { row: 0, col: 0 }
+    return cell(c) == VGA
+}
+
+test "letzte Zelle" {
+    let c = Cursor { row: 24, col: 79 }
+    return cell(c) == 0xB8F9E
+}
+
+test "Zeilenende springt um" {
+    var c = Cursor { row: 24, col: 5 }
+    newline(change c)
+    return c.row == 0 and c.col == 0
+}

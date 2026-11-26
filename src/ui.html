@@ -76,7 +76,7 @@ textarea {
   font: inherit; color: var(--ink); background: transparent; border: 0; margin: 0; resize: none;
   padding: 10px 12px; flex: 1 1 auto; min-width: 0; white-space: pre; overflow-x: auto; overflow-y: hidden; tab-size: 4;
 }
-#world { font-family: var(--font-mono); font-size: 14px; line-height: 21px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; width: 100%; }
+#world, .modfile { font-family: var(--font-mono); font-size: 14px; line-height: 21px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; width: 100%; }
 .runbar { position: sticky; bottom: 0; padding: 10px 14px; background: var(--surface); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 button.run {
   font: inherit; font-weight: 600; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 8px;
@@ -89,6 +89,14 @@ button.run:active { transform: translateY(1px); }
 .status.warn .dot { background: var(--warn); } .status.warn { color: var(--warn); }
 .status.bad .dot { background: var(--bad); } .status.bad { color: var(--bad); }
 .hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
+#modules { display: flex; flex-direction: column; gap: 12px; }
+#modules:empty { display: none; }
+.modwrap { display: flex; flex-direction: column; gap: 6px; }
+.modhead, .modadd { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.modadd input { font: inherit; font-size: 16px; color: var(--ink); background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; flex: 1 1 160px; min-width: 0; }
+button.plain { font: inherit; font-size: 0.875rem; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+ul.msgs li.test { border-left-color: var(--ok); }
+ul.msgs li.test.failed { border-left-color: var(--bad); }
 ul.msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 ul.msgs li { border-left: 3px solid var(--bad); padding: 6px 10px; background: var(--code-bg); border-radius: 0 6px 6px 0; }
 ul.msgs li.warn { border-left-color: var(--warn); }
@@ -122,7 +130,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 <body>
 <div class="page">
   <header>
-    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.7</span></div>
+    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.9</span></div>
     <p class="lede">Latch-Code schreiben, prüfen und ausführen. Der Prüfer zeigt, was das Programm darf, und lehnt ab, was ungeprüfte Daten oder Geheimnisse falsch verwendet.</p>
   </header>
 
@@ -146,8 +154,21 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       <details class="panel" id="world-panel">
         <summary>Außenwelt (simuliert)</summary>
         <div class="panel-body">
-          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>db tabelle = down</code>, <code>mail = down</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>.</p>
+          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>file name = down</code>, <code>mail = down</code>, <code>env NAME = wert</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>, <code>interrupts = 33 33</code>, <code>ticks = 6</code> (Uhr, Interrupt 32), <code>forever = 100</code> (Durchläufe, bis der Prüfstand anhält), <code>foreign funktion = wert</code>.</p>
           <textarea id="world" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Simulierte Außenwelt"></textarea>
+        </div>
+      </details>
+
+      <details class="panel" id="modules-panel">
+        <summary>Weitere Dateien (Module)</summary>
+        <div class="panel-body">
+          <p class="hint">Jede Datei ist ein Modul. Das Programm oben holt es mit <code>import Name</code> und sieht davon nur, was <code>public</code> ist.</p>
+          <div id="modules"></div>
+          <div class="modadd">
+            <input id="modname" type="text" placeholder="Name, zum Beispiel Screen" aria-label="Name der neuen Datei" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off">
+            <button class="plain" id="modadd" type="button">Datei anlegen</button>
+          </div>
+          <p class="hint" id="modhint" role="status"></p>
         </div>
       </details>
     </div>
@@ -182,31 +203,48 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li><code>take</code> und <code>change</code> stehen am Parameter und beim Aufruf. <code>change</code> verlangt eine mit <code>var</code> angelegte Variable.</li>
             <li><code>region</code>: Was mit <code>name.new(…)</code> entsteht, darf den Block nicht verlassen.</li>
             <li><code>match</code> muss jeden Fall einer Aufzählung abdecken.</li>
+            <li>Typen: Argumente, Rückgaben, Felder, Angaben von Varianten, Zuweisungen, Bedingungen und Rechenzeichen müssen zum erklärten Typ passen. Der Fehlertyp hinter <code>fails</code> ist der einzige Fehler, den eine Funktion zurückgeben darf.</li>
+            <li>Eingeschränkte Typen (<code>where</code>): Ein Wert passt an seinen Grundtyp, aber nie zurück. Er entsteht nur durch <code>check … as</code> oder als fester Wert, den der Prüfer gegen die Einschränkung nachrechnet.</li>
+            <li>Namen: Typen, Varianten und Konstanten beginnen groß, Funktionen, Variablen, Parameter und Felder klein.</li>
+            <li>Rechte kommen aus dem festen Katalog: <code>Net</code>, <code>File</code>, <code>Clock</code>, <code>Random</code>, <code>Env</code>, <code>Process</code>, <code>Console</code>, <code>Memory</code>, <code>Port</code>, <code>Cpu</code>, <code>Tasks</code>, <code>Interrupt</code>.</li>
+            <li>Module: Jede Datei ist ein Modul. Von außen ist nur sichtbar, was <code>public</code> ist. Öffentliche Funktionen brauchen einen Vertrag. <code>destroy</code> geht nur im Modul der Ressource.</li>
+            <li><code>handles Interrupt(n)</code>: keine Parameter, eine Funktion je Nummer. Das Ergebnis ist ein Ereignis, bei allen dieselbe Aufzählung. <code>main</code> holt es mit <code>Interrupt.wait()</code> oder <code>Interrupt.next()</code> ab und braucht dafür <code>uses Interrupt</code>. Die Rechte von <code>main</code> sind auch für diese Funktionen die Obergrenze.</li>
+            <li><code>together</code> verlangt <code>uses Tasks</code>. Die Zeilen sehen einander nicht und teilen nichts, was eine von ihnen verändert.</li>
+            <li><code>foreign function</code> hat keinen Rumpf, verlangt eine Annahme und steht im Bericht als ungeprüft.</li>
+            <li><code>const</code> ist ein fester, offener Wert. <code>test</code> ist rein und endet mit einem Wahrheitswert. <code>with</code> ändert nur die Kopie eines Datensatzes.</li>
             <li>Tabellen: <code>xs[i]</code> liest, <code>xs[i] = …</code> und <code>xs[i].feld = …</code> schreiben. Ungeprüfte Werte und Geheimnisse sind als Stelle verboten.</li>
             <li><code>assembly function</code> hat keinen Rumpf, verlangt <code>uses Cpu</code> und eine Annahme und steht im Bericht als ungeprüft.</li>
             <li>Hardware: <code>Memory(a..b)</code> und <code>Port(n)</code> sind Rechte wie alle anderen. Wer eine Funktion aufruft, braucht mindestens deren Bereich.</li>
           </ul>
           <p class="sub">Noch vereinfacht</p>
           <ul>
-            <li>Verträge (<code>requires</code>, <code>ensures</code>) werden beim Ausführen geprüft, nicht bewiesen.</li>
+            <li>Verträge (<code>requires</code>, <code>ensures</code> mit <code>old</code>) sowie <code>invariant</code> und <code>decreases</code> werden beim Ausführen geprüft, nicht bewiesen. Eine <code>while</code>-Schleife ohne <code>decreases</code> gibt nur eine Warnung.</li>
+            <li><code>forever</code> hält der Prüfstand an: nach 100 Durchläufen, oder wenn <code>Interrupt.wait()</code> wartet und die Außenwelt nichts mehr liefert. Echte Hardware liefe weiter.</li>
+            <li>Unterbrechungen kommen nur zu Beginn eines Durchlaufs von <code>forever</code> und in <code>Interrupt.wait()</code> an, nie mitten in einer Funktion. Jede Taste aus <code>keys</code> löst Interrupt 33 aus, <code>ticks</code> die Uhr mit Interrupt 32. Die Warteschlange fasst 64 Ereignisse, was nicht hineinpasst, geht verloren und wird gezählt (<code>Interrupt.lost()</code>).</li>
+            <li><code>together</code> führt die Zeilen nacheinander aus, nicht wirklich gleichzeitig.</li>
+            <li>Fremder Code läuft nicht. Das Ergebnis einer <code>foreign function</code> kommt aus der Außenwelt und wird gegen den erklärten Typ geprüft.</li>
+            <li><code>Bits</code> rechnet nur mit Zahlen ab 0 und bis 2<sup>53</sup>.</li>
             <li>Netz, Datenbank, Mail und Kryptografie sind simuliert. Nichts verlässt diese Seite.</li>
             <li>Regionen werden nur geprüft. Speicher gibt der Prototyp nicht wirklich frei.</li>
             <li>Feste Adressen prüft der Prüfer sofort. Berechnete Adressen und Stellen in Tabellen prüft er erst beim Ausführen, echtes Latch müsste sie beweisen.</li>
             <li>Assembler führt der Prototyp nicht aus. Ein Aufruf erscheint nur als Zeile in der Ausgabe.</li>
             <li>Bildschirmspeicher (ab <code>0xB8000</code>), serielle Schnittstelle (<code>0x3F8</code>) und Tastatur (<code>0x60</code>, <code>0x64</code>) sind nachgebaut, keine echte Hardware.</li>
-            <li>Typen werden noch nicht abgeglichen: Ob ein übergebener Wert zum Typ des Parameters passt, prüft der Prototyp nicht. Geprüft werden Rechte, Markierungen, Fehlerfälle und Ressourcen.</li>
+            <li>Der einzige Beweis für eingeschränkte Typen ist das Nachrechnen fester Werte. Alles andere braucht <code>check</code>, auch wenn es sich beweisen ließe (etwa <code>age + 1</code> bei bekanntem Bereich).</li>
+            <li>Die Größe einer Tabelle wird nur verglichen, wenn sie als feste Zahl dasteht. <code>Map&lt;K, V&gt;</code> ist als Typ bekannt, hat aber noch keine Funktionen.</li>
             <li>Ressourcen können noch nicht in Feldern, Listen oder Varianten stehen.</li>
           </ul>
           <p class="sub">Fehlt noch</p>
           <ul>
-            <li>Beweise für Verträge. Dazu gehören die schon entschiedenen Wörter <code>old</code>, <code>invariant</code>, <code>decreases</code> und <code>forever</code>.</li>
-            <li>Module mit <code>public</code> und <code>import</code>, <code>together</code>, <code>foreign function</code>, <code>handles Interrupt(n)</code>, <code>const</code>, <code>test</code>, <code>hardened</code>, die Bibliothek <code>Bits</code>.</li>
-            <li>Der feste Katalog der Rechte. <code>Db</code>, <code>Input</code> und <code>Console</code> sind Platzhalter des Prüfstands.</li>
+            <li>Beweise für Verträge, Schleifen, Tabellengrenzen und berechnete Adressen. Erst damit gilt: Unbewiesenes läuft nicht.</li>
+            <li>Ein Compiler. Bis dahin auch <code>hardened</code>, die typisierten Texte (<code>sql"…"</code>) und die Anmeldung der Rechte beim Betriebssystem.</li>
+            <li>Bibliothek für <code>Process</code> und für echte Dateien. <code>File</code> ist hier eine Liste von Einträgen je Name.</li>
           </ul>
           <p class="sub">Bibliothek</p>
           <ul>
-            <li><code>Console.print(x)</code>, <code>Input.read("feld")</code>, <code>Net.get("host", pfad)</code></li>
-            <li><code>Db.insert("tabelle", satz)</code>, <code>Db.exists("tabelle", "feld", wert)</code>, <code>Db.count("tabelle")</code></li>
+            <li><code>Console.print(x)</code>, <code>Console.read("feld")</code>, <code>Env.get("NAME")</code>, <code>Net.get("host", pfad)</code></li>
+            <li><code>File.append("name", satz)</code>, <code>File.find("name", "feld", wert)</code>, <code>File.count("name")</code></li>
+            <li><code>Bits.and(a, b)</code>, <code>Bits.or(a, b)</code>, <code>Bits.xor(a, b)</code>, <code>Bits.shift_left(a, n)</code>, <code>Bits.shift_right(a, n)</code>, <code>Bits.test(a, bit)</code></li>
+            <li><code>Interrupt.wait()</code>, <code>Interrupt.next()</code>, <code>Interrupt.lost()</code></li>
             <li><code>Mail.send("host", an, betreff, text)</code>, <code>Clock.now()</code>, <code>Random.int(a, b)</code></li>
             <li><code>Kem.generate()</code>, <code>Crypto.encrypt(key, text)</code>, <code>Crypto.public_key(key)</code>, <code>Text.contains(text, teil)</code>, <code>Text.bytes(text)</code>, <code>List.at(liste, stelle)</code>, <code>Table.fill(anzahl, wert)</code></li>
             <li><code>Memory.write(adresse, byte)</code>, <code>Memory.read(adresse)</code>, <code>Port.write(port, byte)</code>, <code>Port.read(port)</code></li>
@@ -257,7 +295,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     '',
     'function alloc(change pool: Pool)',
     '    -> Page fails MemError',
-    '    ensures pool.free >= 0',
+    '    ensures pool.free',
+    '        == old(pool.free) - 1',
     '{',
     '    if pool.free == 0 {',
     '        return OutOfMemory',
@@ -270,48 +309,51 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     '',
     'function free(change pool: Pool,',
     '              take page: Page)',
-    '    ensures pool.free >= 1',
+    '    ensures pool.free',
+    '        == old(pool.free) + 1',
     '{',
     '    pool.free = pool.free + 1',
     '    destroy page',
     '}'
   ].join('\n');
 
+  var KERNEL = /*__KERNEL__*/;
+
   var EXAMPLES = [
     { title: 'Anmeldung (läuft durch)', world: SIGNUP_WORLD, code: [
       'latch 1', '', TYPES, '',
       'function parse()',
       '    -> Signup fails SignupError',
-      '    uses Input',
+      '    uses Console',
       '{',
-      '    let name = check Input.read("name")',
-      '        as Name',
+      '    let name = check',
+      '        Console.read("name") as Name',
       '        otherwise return BadInput("name")',
-      '    let email = check Input.read("email")',
-      '        as Email',
+      '    let email = check',
+      '        Console.read("email") as Email',
       '        otherwise return BadInput("email")',
-      '    let age = check Input.read("age")',
-      '        as Age',
+      '    let age = check',
+      '        Console.read("age") as Age',
       '        otherwise return BadInput("age")',
       '    return Signup { name, email, age }',
       '}',
       '',
       'function store(s: Signup)',
       '    -> Int fails SignupError',
-      '    uses Db("accounts")',
+      '    uses File("accounts.db")',
       '    ensures result >= 1',
       '{',
-      '    if Db.exists("accounts",',
+      '    if File.find("accounts.db",',
       '                 "email", s.email) {',
       '        return Taken',
       '    }',
-      '    return Db.insert("accounts", s)',
+      '    return File.append("accounts.db", s)',
       '        otherwise return Unavailable',
       '}',
       '',
       'function main()',
       '    -> Int fails SignupError',
-      '    uses Input, Db("accounts"),',
+      '    uses File("accounts.db"),',
       '         Net("smtp.x.com"), Console',
       '{',
       '    let s = parse() otherwise as e {',
@@ -608,13 +650,20 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       '        task("uhr", 1),',
       '    ]',
       '    var next = pick(tasks, 2)',
-      '    while next >= 0 {',
+      '    // 2 + 3 + 1 Zeitscheiben:',
+      '    var todo = 6',
+      '    while next >= 0',
+      '        invariant todo >= 0',
+      '        decreases todo',
+      '    {',
       '        step(change tasks, next)',
+      '        todo = todo - 1',
       '        next = pick(tasks, next)',
       '    }',
       '    log("alle Aufgaben fertig")',
       '}'
     ].join('\n') },
+    { title: 'Latch OS: alle Bausteine in einem Kern', world: 'keys = hallo latch\nticks = 7', code: KERNEL.main, modules: KERNEL.modules },
     { title: 'Region und match', world: '', code: [
       'latch 1', '',
       'type Buffer = { size: Int, used: Int }',
@@ -653,6 +702,249 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       '    }',
       '}'
     ].join('\n') },
+    { title: 'Modul: Bildschirm in eigener Datei', world: '', code: [
+      'latch 1',
+      'import Screen',
+      '',
+      'function main()',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '{',
+      '    var cur = Screen.start()',
+      '    Screen.print(change cur, "Latch OS")',
+      '',
+      '    // with: geänderte Kopie',
+      '    cur = cur with { row: 2, col: 4 }',
+      '    Screen.print(change cur, "aus Modul")',
+      '',
+      '    // cell ist dort nicht public,',
+      '    // das hier lehnt der Prüfer ab:',
+      '    // let at = Screen.cell(cur)',
+      '}'
+    ].join('\n'), modules: {
+      Screen: [
+      'latch 1',
+      '',
+      'public const WIDTH = 80',
+      'public const HEIGHT = 25',
+      'const VGA = 0xB8000',
+      '',
+      'public type Cursor = {',
+      '    row: Int,',
+      '    col: Int,',
+      '}',
+      '',
+      'public function start() -> Cursor',
+      '    ensures result.row == 0',
+      '    ensures result.col == 0',
+      '{',
+      '    return Cursor { row: 0, col: 0 }',
+      '}',
+      '',
+      '// Nicht public: nur hier sichtbar',
+      'function cell(cur: Cursor) -> Int',
+      '    requires cur.row in 0..HEIGHT - 1',
+      '    requires cur.col in 0..WIDTH - 1',
+      '{',
+      '    return VGA',
+      '        + (cur.row * WIDTH + cur.col) * 2',
+      '}',
+      '',
+      'public function put(change cur: Cursor,',
+      '                    ch: Int)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '    requires ch in 0..255',
+      '    ensures cur.col in 0..WIDTH - 1',
+      '{',
+      '    Memory.write(cell(cur), ch)',
+      '    Memory.write(cell(cur) + 1, 0x0F)',
+      '    cur.col = cur.col + 1',
+      '    if cur.col == WIDTH {',
+      '        cur.col = 0',
+      '        cur.row = cur.row + 1',
+      '    }',
+      '    if cur.row == HEIGHT { cur.row = 0 }',
+      '}',
+      '',
+      'public function print(change cur: Cursor,',
+      '                      msg: Text)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '    ensures cur.row in 0..HEIGHT - 1',
+      '{',
+      '    for b in Text.bytes(msg) {',
+      '        put(change cur, b)',
+      '    }',
+      '}',
+      '',
+      'test "erste Zelle" {',
+      '    let c = Cursor { row: 0, col: 0 }',
+      '    return cell(c) == VGA',
+      '}',
+      '',
+      'test "zweite Zeile" {',
+      '    let c = Cursor { row: 1, col: 0 }',
+      '    return cell(c) == VGA + 160',
+      '}'
+      ].join('\n')
+    } },
+    { title: 'Kern: Unterbrechung und forever', world: 'keys = latch', code: [
+      'latch 1',
+      '',
+      'type Byte = Int where it in 0..255',
+      '',
+      'enum Event {',
+      '    Key(code: Byte),',
+      '    Released,',
+      '    Fault,',
+      '}',
+      '',
+      '// Die Tastatur meldet sich selbst,',
+      '// niemand ruft on_key auf. Das',
+      '// Ergebnis landet in der Warteschlange.',
+      'function on_key() -> Event',
+      '    handles Interrupt(33)',
+      '    uses Port(0x60)',
+      '    assumes "PS/2 data port at 0x60"',
+      '{',
+      '    let code = check Port.read(0x60)',
+      '        as Byte',
+      '        otherwise return Fault',
+      '    // Bit 7 gesetzt: Taste losgelassen',
+      '    if Bits.test(code, 7) {',
+      '        return Released',
+      '    }',
+      '    return Key(code)',
+      '}',
+      '',
+      'function main()',
+      '    uses Port(0x60), Interrupt, Console',
+      '{',
+      '    // Der Zustand bleibt in main:',
+      '    var count = 0',
+      '    Console.print("bereit")',
+      '    forever {',
+      '        // schläft, bis etwas kommt',
+      '        let ev = Interrupt.wait()',
+      '        match ev {',
+      '            Key(code) -> {',
+      '                count = count + 1',
+      '                Console.print(',
+      '                    "Taste {count}: {code}")',
+      '            }',
+      '            Released -> { }',
+      '            Fault -> {',
+      '                Console.print("gestört")',
+      '            }',
+      '        }',
+      '    }',
+      '}'
+    ].join('\n') },
+    { title: 'Verträge: old, invariant, test', world: '', code: [
+      'latch 1',
+      '',
+      'type Account = {',
+      '    owner: Text,',
+      '    balance: Int,',
+      '}',
+      '',
+      'function deposit(change a: Account,',
+      '                 amount: Int)',
+      '    requires amount > 0',
+      '    ensures a.balance',
+      '        == old(a.balance) + amount',
+      '{',
+      '    a.balance = a.balance + amount',
+      '}',
+      '',
+      '// 5 Prozent Zinsen je Jahr',
+      'function grow(start: Int, years: Int)',
+      '    -> Int',
+      '    requires start >= 0',
+      '    requires years >= 0',
+      '    ensures result >= start',
+      '{',
+      '    var sum = start',
+      '    var left = years',
+      '    while left > 0',
+      '        invariant sum >= start',
+      '        decreases left',
+      '    {',
+      '        sum = sum + sum * 5 / 100',
+      '        left = left - 1',
+      '    }',
+      '    return sum',
+      '}',
+      '',
+      'test "zwei Jahre" {',
+      '    return grow(1000, 2) == 1102',
+      '}',
+      '',
+      'test "with ändert nur die Kopie" {',
+      '    let a = Account {',
+      '        owner: "Ada", balance: 10 }',
+      '    let b = a with { balance: 99 }',
+      '    return a.balance == 10',
+      '        and b.balance == 99',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    var a = Account {',
+      '        owner: "Ada", balance: 1000 }',
+      '    deposit(change a, 500)',
+      '    Console.print(grow(a.balance, 3))',
+      '}'
+    ].join('\n') },
+    { title: 'Gleichzeitig: together', world: 'net api.weather.com/v1/berlin = 7\nnet api.weather.com/v1/dresden = 3', code: [
+      'latch 1',
+      '',
+      'type Celsius = Int',
+      '    where it in -90..60',
+      '',
+      'function weather(city: Text)',
+      '    -> unchecked Text',
+      '    uses Net("api.weather.com")',
+      '{',
+      '    return Net.get("api.weather.com",',
+      '                   "/v1/" + city)',
+      '}',
+      '',
+      'function main()',
+      '    uses Net("api.weather.com"),',
+      '         Tasks, Console',
+      '{',
+      '    // Beide Abrufe laufen zugleich:',
+      '    together {',
+      '        let a = weather("berlin")',
+      '        let b = weather("dresden")',
+      '    }',
+      '    let berlin = check a as Celsius',
+      '        otherwise return Done',
+      '    let dresden = check b as Celsius',
+      '        otherwise return Done',
+      '    Console.print(',
+      '        "Abstand: {berlin - dresden}")',
+      '}'
+    ].join('\n') },
+    { title: 'Fremder Code: foreign', world: 'foreign c_strlen = 5', code: [
+      'latch 1',
+      '',
+      'type Len = Int where it in 0..4096',
+      '',
+      '// Fremder Code hat keinen Rumpf.',
+      '// Niemand prüft seinen Inhalt,',
+      '// dafür steht jemand ein:',
+      'foreign function c_strlen(s: Text)',
+      '    -> Len',
+      '    assumes "strlen from libc"',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    let n = c_strlen("hallo")',
+      '    Console.print("Länge {n}")',
+      '}'
+    ].join('\n') },
     { title: 'Fehler: Recht fehlt', world: '', code: [
       'latch 1', '',
       '// add soll nur rechnen.',
@@ -677,9 +969,9 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       '    where it in 0..150',
       '',
       'function main()',
-      '    uses Input, Console',
+      '    uses Console',
       '{',
-      '    let raw = Input.read("age")',
+      '    let raw = Console.read("age")',
       '',
       '    // Beides lehnt der Prüfer ab:',
       '    if raw == "36" {',
@@ -712,6 +1004,37 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       '    let pin = secret 4711',
       '    Console.print(reveal pin',
       '        because "user must type it")',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: falscher Typ', world: '', code: [
+      'latch 1', '',
+      'type Age = Int',
+      '    where it in 0..150',
+      '',
+      'function greet(name: Text, age: Age)',
+      '    -> Text',
+      '{',
+      '    return "{name} ist {age}"',
+      '}',
+      '',
+      '// Rechnen ergibt Int, kein Age:',
+      'function next(age: Age) -> Age',
+      '{',
+      '    return age + 1',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    // Vertauscht:',
+      '    Console.print(greet(36, "Ada"))',
+      '',
+      '    // Feste Werte rechnet der',
+      '    // Prüfer nach, 200 passt nicht:',
+      '    Console.print(greet("Ada", 200))',
+      '',
+      '    // So geht es:',
+      '    Console.print(greet("Ada", 36))',
       '}'
     ].join('\n') },
     { title: 'Fehler: Speicher falsch benutzt', world: '', code: [
@@ -807,9 +1130,43 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     var span = gutter.children[line - 1];
     if (span && span.scrollIntoView) span.scrollIntoView({ block: 'center' });
   }
+  var modBox = $('modules');
+  function stale() { marks = { err: {}, warn: {} }; layout(); setStatus('', 'Geändert, noch nicht geprüft'); }
+  function addModule(name, text) {
+    var wrap = el('div', 'modwrap'), head = el('div', 'modhead'), ta = el('textarea', 'modfile'), rm = el('button', 'plain', 'Entfernen');
+    wrap.setAttribute('data-name', name);
+    head.appendChild(el('span', 'fn-name', name));
+    rm.type = 'button';
+    rm.addEventListener('click', function () { modBox.removeChild(wrap); stale(); });
+    head.appendChild(rm);
+    ta.value = text;
+    ta.rows = Math.max(3, text.split('\n').length);
+    ta.spellcheck = false;
+    ta.setAttribute('autocapitalize', 'off'); ta.setAttribute('autocomplete', 'off'); ta.setAttribute('autocorrect', 'off'); ta.setAttribute('wrap', 'off');
+    ta.setAttribute('aria-label', 'Latch-Code des Moduls ' + name);
+    ta.addEventListener('input', function () { ta.rows = Math.max(3, ta.value.split('\n').length); stale(); });
+    wrap.appendChild(head); wrap.appendChild(ta);
+    modBox.appendChild(wrap);
+  }
+  function modules() {
+    var m = {};
+    Array.prototype.forEach.call(modBox.children, function (w) { m[w.getAttribute('data-name')] = w.lastChild.value; });
+    return m;
+  }
+  $('modadd').addEventListener('click', function () {
+    var name = $('modname').value.trim(), hint = $('modhint');
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) { hint.textContent = 'Modulnamen beginnen mit einem Großbuchstaben und bestehen aus Buchstaben, Ziffern und _.'; return; }
+    if (Object.prototype.hasOwnProperty.call(modules(), name)) { hint.textContent = 'Die Datei ' + name + ' gibt es schon.'; return; }
+    hint.textContent = '';
+    $('modname').value = '';
+    addModule(name, 'latch 1\n\n');
+    stale();
+  });
+
   function msgItem(m, cls) {
     var li = el('li', cls);
-    if (m.line) {
+    if (m.module) li.appendChild(el('strong', '', 'Modul ' + m.module + (m.line ? ', Zeile ' + m.line + ': ' : ': ')));
+    else if (m.line) {
       var b = el('button', '', 'Zeile ' + m.line);
       b.type = 'button';
       b.addEventListener('click', function () { gotoLine(m.line); });
@@ -825,13 +1182,14 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     s.lastChild.textContent = text;
   }
 
-  var KIND = { out: 'Konsole', net: 'Netz', db: 'Daten', mail: 'Mail', serial: 'Seriell', port: 'Port', mem: 'Speicher', asm: 'Assembler' };
+  var KIND = { out: 'Konsole', net: 'Netz', file: 'Datei', mail: 'Mail', serial: 'Seriell', port: 'Port', mem: 'Speicher', asm: 'Assembler', foreign: 'Fremd', irq: 'Unterbr.', halt: 'Prüfstand' };
 
   function render(r) {
     marks = { err: {}, warn: {} };
-    r.errors.forEach(function (e) { marks.err[e.line] = true; });
-    r.warnings.forEach(function (w) { marks.warn[w.line] = true; });
-    if (r.runtimeError && r.runtimeError.line) marks.err[r.runtimeError.line] = true;
+    r.errors.forEach(function (e) { if (!e.module) marks.err[e.line] = true; });
+    r.warnings.forEach(function (w) { if (!w.module) marks.warn[w.line] = true; });
+    if (r.runtimeError && r.runtimeError.line && !r.runtimeError.module) marks.err[r.runtimeError.line] = true;
+    var tests = r.tests || [], lost = tests.filter(function (t) { return !t.ok; }).length;
     layout();
 
     var check = $('check'), out = $('output'), rep = $('report');
@@ -859,13 +1217,21 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       head.className = 'status warn';
       label.textContent = 'Geprüft. main endete mit dem Fehlerwert ' + r.mainResult;
       setStatus('warn', 'Fehlerwert ' + r.mainResult);
+    } else if (lost) {
+      head.className = 'status warn';
+      label.textContent = 'Geprüft und gelaufen, aber ' + (lost === 1 ? '1 Test ist' : lost + ' Tests sind') + ' gescheitert';
+      setStatus('warn', lost === 1 ? '1 Test gescheitert' : lost + ' Tests gescheitert');
     } else {
       head.className = 'status ok';
-      label.textContent = 'Geprüft und ohne Fehler gelaufen';
-      setStatus('ok', 'Gelaufen');
-      if (!r.warnings.length) list.appendChild(msgItem({ line: 0, msg: 'Rechte, ungeprüfte Daten, Geheimnisse und Fehlerfälle sind in Ordnung.' }, 'good'));
+      label.textContent = r.halted ? 'Geprüft und gelaufen, bis der Prüfstand forever angehalten hat' : 'Geprüft und ohne Fehler gelaufen';
+      setStatus('ok', r.halted ? 'Gelaufen, forever angehalten' : 'Gelaufen');
+      if (!r.warnings.length) list.appendChild(msgItem({ line: 0, msg: 'Rechte, Typen, ungeprüfte Daten, Geheimnisse und Fehlerfälle sind in Ordnung.' }, 'good'));
     }
     r.warnings.forEach(function (w) { list.appendChild(msgItem(w, 'warn')); });
+    tests.forEach(function (t) {
+      var where = t.module ? ' (Modul ' + t.module + ')' : '';
+      list.appendChild(msgItem({ line: t.module ? 0 : t.line, msg: (t.ok ? 'Test bestanden: ' : 'Test gescheitert: ') + t.name + where + (t.ok ? '' : '. ' + t.msg) }, t.ok ? 'test' : 'test failed'));
+    });
     if (list.firstChild) check.appendChild(list);
 
     $('screen-panel').hidden = !r.screen;
@@ -891,14 +1257,28 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     if (r.report.program.length) r.report.program.forEach(function (x) { chips.appendChild(el('span', 'chip', x)); });
     else chips.appendChild(el('span', 'chip pure', 'nichts nach außen'));
     rep.appendChild(chips);
+    function section(title, items) {
+      if (!items.length) return;
+      rep.appendChild(el('p', 'sub', title));
+      var box = el('div', 'chips');
+      items.forEach(function (x) { box.appendChild(el('span', 'chip', x)); });
+      rep.appendChild(box);
+    }
+    section('Module', r.report.modules || []);
+    section('Unterbrechungen', (r.report.interrupts || []).map(function (i) { return 'Interrupt(' + i.n + ') → ' + i.name + ' meldet ' + i.event; }));
+    section('Endlosschleifen', (r.report.forever || []).map(function (f) { return f.name + ', Zeile ' + f.line; }));
+    section('Tests', (r.report.tests || []).map(function (t) { return (t.module ? t.module + ': ' : '') + t.name; }));
     rep.appendChild(el('p', 'sub', 'Funktionen'));
     r.report.functions.forEach(function (f) {
       var d = el('div', 'fn');
       var top = el('div', 'chips');
       top.appendChild(el('span', 'fn-name', f.name));
       if (f.assembly) top.appendChild(el('span', 'chip asm', 'Assembler, ungeprüft'));
+      if (f.foreign) top.appendChild(el('span', 'chip asm', 'fremder Code, ungeprüft'));
+      if (f.handles !== null && f.handles !== undefined) top.appendChild(el('span', 'chip asm', 'behandelt Interrupt(' + f.handles + ')'));
+      if (f.forever && f.forever.length) top.appendChild(el('span', 'chip asm', 'endet nie (forever)'));
       if (f.rights.length) f.rights.forEach(function (x) { top.appendChild(el('span', 'chip', x)); });
-      else if (!f.assembly) top.appendChild(el('span', 'chip pure', 'rein'));
+      else if (!f.assembly && !f.foreign) top.appendChild(el('span', 'chip pure', 'rein'));
       d.appendChild(top);
       var dl = el('dl');
       function row(k, v) { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); }
@@ -916,7 +1296,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 
   function run(scroll) {
     var r;
-    try { r = window.Latch.run(code.value, world.value); }
+    try { r = window.Latch.run(code.value, world.value, modules()); }
     catch (e) {
       r = { errors: [{ line: 0, msg: 'Interner Fehler des Prototyps: ' + (e && e.message ? e.message : e) }], warnings: [], report: null, output: [], ran: false, runtimeError: null, mainResult: null, mainFailed: false };
     }
@@ -937,10 +1317,13 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
     world.value = EXAMPLES[i].world;
     world.rows = Math.max(3, world.value.split('\n').length + 1);
     if (EXAMPLES[i].world) $('world-panel').open = true;
+    clear(modBox);
+    Object.keys(EXAMPLES[i].modules || {}).forEach(function (name) { addModule(name, EXAMPLES[i].modules[name]); });
+    $('modules-panel').open = !!modBox.firstChild;
     run(false);
   }
   select.addEventListener('change', function () { load(parseInt(select.value, 10)); });
-  code.addEventListener('input', function () { marks = { err: {}, warn: {} }; layout(); setStatus('', 'Geändert, noch nicht geprüft'); });
+  code.addEventListener('input', stale);
   $('run').addEventListener('click', function () { run(true); });
   load(0);
 })();

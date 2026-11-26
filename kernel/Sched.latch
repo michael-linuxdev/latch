@@ -1,0 +1,67 @@
+latch 1
+
+// Planer: reihum, drei Aufgaben
+
+public enum State { Ready, Finished }
+
+public type Task = {
+    name: Text,
+    left: Int,
+    state: State,
+}
+
+// Der Wechsel selbst ist Assembler:
+assembly function switch_to(id: Int)
+    uses Cpu
+    assumes "saves and loads all registers"
+
+public function task(name: Text,
+                     left: Int)
+    -> Task
+    requires left > 0
+    ensures result.left == left
+{
+    return Task { name, left,
+                  state: Ready }
+}
+
+// Die naechste bereite Aufgabe nach
+// last, -1 wenn keine mehr wartet
+public function pick(
+    tasks: Table<Task, 3>, last: Int)
+    -> Int
+    requires last in 0..2
+    ensures result in -1..2
+{
+    for k in 1..3 {
+        let i = (last + k) % 3
+        let t = tasks[i]
+        if t.state == Ready { return i }
+    }
+    return -1
+}
+
+// Eine Zeitscheibe fuer Aufgabe i
+public function step(
+    change tasks: Table<Task, 3>, i: Int)
+    uses Cpu
+    requires i in 0..2
+    requires tasks[i].left > 0
+    ensures tasks[i].left
+        == old(tasks[i].left) - 1
+{
+    switch_to(i)
+    let t = tasks[i]
+    tasks[i].left = t.left - 1
+    if t.left == 1 {
+        tasks[i].state = Finished
+    }
+}
+
+test "reihum" {
+    let ts = [task("a", 1),
+              task("b", 1),
+              task("c", 1)]
+    return pick(ts, 0) == 1
+        and pick(ts, 2) == 0
+}

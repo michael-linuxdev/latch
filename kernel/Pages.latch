@@ -1,0 +1,60 @@
+latch 1
+
+// Seitenverwalter: Jede Seite gibt es
+// genau einmal. Wer sie holt, muss sie
+// zurueckgeben.
+
+public resource Page { frame: Int }
+
+public type Pool = {
+    next: Int,
+    free: Int,
+}
+
+public enum MemError { OutOfMemory }
+
+public function pool(frames: Int) -> Pool
+    requires frames >= 0
+    ensures result.free == frames
+{
+    return Pool { next: 0, free: frames }
+}
+
+public function alloc(change pool: Pool)
+    -> Page fails MemError
+    ensures pool.free
+        == old(pool.free) - 1
+{
+    if pool.free == 0 {
+        return OutOfMemory
+    }
+    let frame = pool.next
+    pool.next = pool.next + 1
+    pool.free = pool.free - 1
+    return Page { frame }
+}
+
+public function free(change pool: Pool,
+                     take page: Page)
+    ensures pool.free
+        == old(pool.free) + 1
+{
+    pool.free = pool.free + 1
+    destroy page
+}
+
+test "holen und zurueckgeben" {
+    var p = pool(2)
+    let a = alloc(change p)
+        otherwise return false
+    free(change p, take a)
+    return p.free == 2
+}
+
+test "leer heisst leer" {
+    var p = pool(0)
+    let a = alloc(change p)
+        otherwise return true
+    free(change p, take a)
+    return false
+}
