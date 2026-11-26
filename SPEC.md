@@ -100,6 +100,28 @@ Jede Zeile im Block läuft gleichzeitig, danach stehen die Namen zur Verfügung.
 - `const NAME = wert` auf Modulebene, `test "name" { ... }` neben dem Code,
   `satz with { feld: wert }` für geänderte Kopien. (Von Claude ergänzt, Einspruch des Autors möglich.)
 
+## Typprüfung
+
+- Jeder Wert hat einen Typ. Argumente, Rückgaben, Felder, Angaben von Varianten, Zuweisungen,
+  Bedingungen und Rechenzeichen müssen passen. Es gibt keine stillen Umwandlungen.
+- Ein eingeschränkter Typ (`where`) passt überall, wo sein Grundtyp erwartet wird, nie umgekehrt.
+  Er entsteht nur über `check x as T` oder einen Beweis. Rechnen ergibt den Grundtyp: `age + 1` ist `Int`.
+- Zwei eingeschränkte Typen über demselben Grundtyp sind verschieden: `Name` ist kein `Email`.
+- Eine Funktion gibt ihr Ergebnis oder eine Variante ihres Fehlertyps zurück, nichts anderes.
+- `change` verlangt genau denselben Typ, weil die Funktion zurückschreibt.
+- Großschreibung wird erzwungen: Typen und Varianten groß, Funktionen, Variablen, Parameter und Felder klein.
+
+Vorschläge aus dem Bau der Typprüfung, im Prüfstand so umgesetzt, Entscheidung des Autors offen:
+
+1. Ein fester Wert gilt als bewiesen, wenn der Compiler ihn gegen die Einschränkung nachrechnet:
+   `let a: Age = 36` geht, `200` wird abgelehnt.
+2. `[a, b, c]` hat den Typ `Table<T, 3>`. Eine `Table<T, n>` passt, wo `List<T>` erwartet wird, nicht umgekehrt.
+3. Die Angaben einer Variante erreicht man nur über `match`, nicht mit `wert.feld`.
+4. Eine Funktion mit Ergebnistyp endet auf jedem Weg mit `return`. Nur `Done` darf fehlen.
+5. `+` verbindet auch Text mit Text. Text und Zahl mischt man über `"{wert}"`.
+6. Bei Namen zählt nur das erste Zeichen. `_name` gilt als klein.
+7. Sind Ergebnis- und Fehlertyp derselbe Typ, ist unklar, was ein `return` bedeutet. Verbieten?
+
 ## Zahlen und Bits
 
 - Es gibt nur `Int`. Der Bereich aus `where` bestimmt die Speichergröße:

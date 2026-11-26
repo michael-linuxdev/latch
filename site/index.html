@@ -182,6 +182,9 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li><code>take</code> und <code>change</code> stehen am Parameter und beim Aufruf. <code>change</code> verlangt eine mit <code>var</code> angelegte Variable.</li>
             <li><code>region</code>: Was mit <code>name.new(…)</code> entsteht, darf den Block nicht verlassen.</li>
             <li><code>match</code> muss jeden Fall einer Aufzählung abdecken.</li>
+            <li>Typen: Argumente, Rückgaben, Felder, Angaben von Varianten, Zuweisungen, Bedingungen und Rechenzeichen müssen zum erklärten Typ passen. Der Fehlertyp hinter <code>fails</code> ist der einzige Fehler, den eine Funktion zurückgeben darf.</li>
+            <li>Eingeschränkte Typen (<code>where</code>): Ein Wert passt an seinen Grundtyp, aber nie zurück. Er entsteht nur durch <code>check … as</code> oder als fester Wert, den der Prüfer gegen die Einschränkung nachrechnet.</li>
+            <li>Namen: Typen und Varianten beginnen groß, Funktionen, Variablen, Parameter und Felder klein.</li>
             <li>Tabellen: <code>xs[i]</code> liest, <code>xs[i] = …</code> und <code>xs[i].feld = …</code> schreiben. Ungeprüfte Werte und Geheimnisse sind als Stelle verboten.</li>
             <li><code>assembly function</code> hat keinen Rumpf, verlangt <code>uses Cpu</code> und eine Annahme und steht im Bericht als ungeprüft.</li>
             <li>Hardware: <code>Memory(a..b)</code> und <code>Port(n)</code> sind Rechte wie alle anderen. Wer eine Funktion aufruft, braucht mindestens deren Bereich.</li>
@@ -194,7 +197,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li>Feste Adressen prüft der Prüfer sofort. Berechnete Adressen und Stellen in Tabellen prüft er erst beim Ausführen, echtes Latch müsste sie beweisen.</li>
             <li>Assembler führt der Prototyp nicht aus. Ein Aufruf erscheint nur als Zeile in der Ausgabe.</li>
             <li>Bildschirmspeicher (ab <code>0xB8000</code>), serielle Schnittstelle (<code>0x3F8</code>) und Tastatur (<code>0x60</code>, <code>0x64</code>) sind nachgebaut, keine echte Hardware.</li>
-            <li>Typen werden noch nicht abgeglichen: Ob ein übergebener Wert zum Typ des Parameters passt, prüft der Prototyp nicht. Geprüft werden Rechte, Markierungen, Fehlerfälle und Ressourcen.</li>
+            <li>Der einzige Beweis für eingeschränkte Typen ist das Nachrechnen fester Werte. Alles andere braucht <code>check</code>, auch wenn es sich beweisen ließe (etwa <code>age + 1</code> bei bekanntem Bereich).</li>
+            <li>Die Größe einer Tabelle wird nur verglichen, wenn sie als feste Zahl dasteht. <code>Map&lt;K, V&gt;</code> ist als Typ bekannt, hat aber noch keine Funktionen.</li>
             <li>Ressourcen können noch nicht in Feldern, Listen oder Varianten stehen.</li>
           </ul>
           <p class="sub">Fehlt noch</p>
@@ -218,7 +222,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 </div>
 
 <script>
-/* Latch 0.1 prototype: lexer, parser, static checker, interpreter, report. */
+/* Latch 0.1 prototype: lexer, parser, static checker (rights, taint, resources, types), interpreter, report. */
 (function (root) {
 'use strict';
 
@@ -372,19 +376,22 @@ Parser.prototype = {
     return prog;
   },
 
-  parseTypeRef: function () {
+  parseTypeRef: function (inner) {
     var taint = 'clean';
-    if (this.isKw('unchecked')) { this.next(); taint = 'unchecked'; }
-    else if (this.isKw('secret')) { this.next(); taint = 'secret'; }
-    var name = this.expectId('Typname').v;
-    if (this.isSym('<')) {
-      this.next();
-      name += '<' + this.parseTypeRef().name;
-      while (this.isSym(',')) { this.next(); name += ', ' + (this.peek().t === 'num' ? this.next().v : this.parseTypeRef().name); }
-      this.expectSym('>');
-      name += '>';
+    if (this.isKw('unchecked') || this.isKw('secret')) {
+      if (inner) this.fail('unchecked und secret stehen ganz vorn am Typ, nicht in spitzen Klammern.');
+      taint = this.next().v;
     }
-    return { name: name, taint: taint };
+    var nt = this.expectId('Typname'), name = nt.v, args = [];
+    if (this.isSym('<')) {
+      do {
+        this.next();
+        args.push(this.peek().t === 'num' ? this.next().v : this.parseTypeRef(true));
+      } while (this.isSym(','));
+      this.expectSym('>');
+      name += '<' + args.map(function (a) { return typeof a === 'number' ? a : a.name; }).join(', ') + '>';
+    }
+    return { name: name, base: nt.v, args: args, taint: taint, line: nt.line };
   },
 
   parseFields: function () {
@@ -428,19 +435,19 @@ Parser.prototype = {
     this.expectSym('{');
     while (!this.isSym('}')) {
       var vt = this.expectId('Name der Variante');
-      var fields = [];
+      var fields = [], ftypes = [];
       if (this.isSym('(')) {
         this.next();
         while (!this.isSym(')')) {
           var fname = this.expectId('Feldname').v;
           this.expectSym(':');
-          this.parseTypeRef();
+          ftypes.push(this.parseTypeRef());
           fields.push(fname);
           if (this.isSym(',')) this.next(); else break;
         }
         this.expectSym(')');
       }
-      variants.push({ name: vt.v, fields: fields, line: vt.line });
+      variants.push({ name: vt.v, fields: fields, ftypes: ftypes, line: vt.line });
       if (this.isSym(',')) this.next(); else break;
     }
     this.expectSym('}');
@@ -459,14 +466,14 @@ Parser.prototype = {
       var pt = this.expectId('Parametername');
       this.expectSym(':');
       var ty = this.parseTypeRef();
-      fn.params.push({ name: pt.v, type: ty.name, taint: ty.taint, mode: mode, line: pt.line });
+      fn.params.push({ name: pt.v, type: ty.name, tref: ty, taint: ty.taint, mode: mode, line: pt.line });
       if (this.isSym(',')) this.next(); else break;
     }
     this.expectSym(')');
     if (this.isSym('->')) {
       this.next();
       var rt = this.parseTypeRef();
-      fn.ret = rt.name; fn.retTaint = rt.taint;
+      fn.ret = rt.name; fn.retRef = rt; fn.retTaint = rt.taint;
       if (this.isKw('fails')) { this.next(); fn.errType = this.expectId('Fehlertyp').v; }
       else if (this.isKw('or')) this.fail('Der Fehlertyp wird mit fails geschrieben, zum Beispiel: -> Int fails SignupError');
     }
@@ -559,11 +566,11 @@ Parser.prototype = {
     if (t.t === 'kw') {
       if (t.v === 'let' || t.v === 'var') {
         this.next();
-        var name = this.expectId('Variablenname').v;
-        if (this.isSym(':')) { this.next(); this.parseTypeRef(); }
+        var name = this.expectId('Variablenname').v, ann = null;
+        if (this.isSym(':')) { this.next(); ann = this.parseTypeRef(); }
         this.expectSym('=');
         var e = this.parseExpr();
-        return { k: 'Let', name: name, mut: t.v === 'var', e: e, other: this.parseOtherwise(), line: t.line };
+        return { k: 'Let', name: name, mut: t.v === 'var', type: ann, e: e, other: this.parseOtherwise(), line: t.line };
       }
       if (t.v === 'return') {
         this.next();
@@ -826,26 +833,26 @@ Parser.prototype = {
 
 /* ---------- Built-in library (simulated outside world) ---------- */
 var BUILTINS = {
-  'Console.print': { right: 'Console', n: 1, ret: 'clean' },
-  'Input.read': { right: 'Input', n: 1, ret: 'unchecked' },
-  'Net.get': { right: 'Net', lit: true, n: 2, ret: 'unchecked' },
-  'Db.insert': { right: 'Db', lit: true, n: 2, ret: 'clean', fallible: 'DbError' },
-  'Db.exists': { right: 'Db', lit: true, n: 3, ret: 'clean' },
-  'Db.count': { right: 'Db', lit: true, n: 1, ret: 'clean' },
-  'Mail.send': { right: 'Net', lit: true, n: 4, ret: 'clean', fallible: 'MailError' },
-  'Clock.now': { right: 'Clock', n: 0, ret: 'clean' },
-  'Random.int': { right: 'Random', n: 2, ret: 'clean' },
-  'Kem.generate': { right: null, n: 0, ret: 'secret' },
-  'Crypto.encrypt': { right: null, n: 2, ret: 'clean', acceptsSecret: true },
-  'Crypto.public_key': { right: null, n: 1, ret: 'clean', acceptsSecret: true },
-  'Text.contains': { right: null, n: 2, ret: 'clean' },
-  'Text.bytes': { right: null, n: 1, ret: 'clean' },
-  'List.at': { right: null, n: 2, ret: 'clean', fallible: 'Missing' },
-  'Table.fill': { right: null, n: 2, ret: 'clean' },
-  'Memory.write': { right: 'Memory', hw: true, n: 2, ret: 'clean' },
-  'Memory.read': { right: 'Memory', hw: true, n: 1, ret: 'clean' },
-  'Port.write': { right: 'Port', hw: true, n: 2, ret: 'clean' },
-  'Port.read': { right: 'Port', hw: true, n: 1, ret: 'unchecked' }
+  'Console.print': { right: 'Console', n: 1, ret: 'clean', p: ['Any'], r: 'Done' },
+  'Input.read': { right: 'Input', n: 1, ret: 'unchecked', p: ['Text'], r: 'Text' },
+  'Net.get': { right: 'Net', lit: true, n: 2, ret: 'unchecked', p: ['Text', 'Text'], r: 'Text' },
+  'Db.insert': { right: 'Db', lit: true, n: 2, ret: 'clean', fallible: 'DbError', p: ['Text', 'Any'], r: 'Int' },
+  'Db.exists': { right: 'Db', lit: true, n: 3, ret: 'clean', p: ['Text', 'Text', 'Any'], r: 'Bool' },
+  'Db.count': { right: 'Db', lit: true, n: 1, ret: 'clean', p: ['Text'], r: 'Int' },
+  'Mail.send': { right: 'Net', lit: true, n: 4, ret: 'clean', fallible: 'MailError', p: ['Text', 'Text', 'Text', 'Text'], r: 'Done' },
+  'Clock.now': { right: 'Clock', n: 0, ret: 'clean', p: [], r: 'Int' },
+  'Random.int': { right: 'Random', n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
+  'Kem.generate': { right: null, n: 0, ret: 'secret', p: [], r: 'Text' },
+  'Crypto.encrypt': { right: null, n: 2, ret: 'clean', acceptsSecret: true, p: ['Any', 'Any'], r: 'Text' },
+  'Crypto.public_key': { right: null, n: 1, ret: 'clean', acceptsSecret: true, p: ['Any'], r: 'Text' },
+  'Text.contains': { right: null, n: 2, ret: 'clean', p: ['Text', 'Text'], r: 'Bool' },
+  'Text.bytes': { right: null, n: 1, ret: 'clean', p: ['Text'], r: 'Ints' },
+  'List.at': { right: null, n: 2, ret: 'clean', fallible: 'Missing', p: ['List', 'Int'], r: 'Elem' },
+  'Table.fill': { right: null, n: 2, ret: 'clean', p: ['Int', 'Any'], r: 'Fill' },
+  'Memory.write': { right: 'Memory', hw: true, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Done' },
+  'Memory.read': { right: 'Memory', hw: true, n: 1, ret: 'clean', p: ['Int'], r: 'Int' },
+  'Port.write': { right: 'Port', hw: true, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Done' },
+  'Port.read': { right: 'Port', hw: true, n: 1, ret: 'unchecked', p: ['Int'], r: 'Int' }
 };
 var VGA_BASE = 0xB8000, VGA_COLS = 80, VGA_ROWS = 25, VGA_END = VGA_BASE + VGA_COLS * VGA_ROWS * 2 - 1;
 function hex(n) { return '0x' + n.toString(16).toUpperCase(); }
@@ -886,19 +893,168 @@ function checkProgram(prog) {
   var errors = [], warnings = [], seen = {};
   function err(line, msg) { var key = line + '|' + msg; if (!seen[key]) { seen[key] = 1; errors.push({ line: line, msg: msg }); } }
   var types = {}, variants = {}, funcs = {}, enums = {};
-  BUILTIN_ERRORS.forEach(function (e) { variants[e] = { enumName: e, fields: [] }; enums[e] = [e]; });
-  variants.Done = { enumName: 'Done', fields: [] };
+  BUILTIN_ERRORS.forEach(function (e) { variants[e] = { enumName: e, fields: [], ftypesT: [] }; enums[e] = [e]; });
+  variants.Done = { enumName: 'Done', fields: [], ftypesT: [] };
+  enums.Done = ['Done'];
+
+  /* Typen: { n: Name, a: Angaben in spitzen Klammern oder null }. null heisst unbekannt (Folgefehler vermeiden). */
+  function T(n, a) { return { n: n, a: a || null }; }
+  var T_INT = T('Int'), T_TEXT = T('Text'), T_BOOL = T('Bool'), T_DONE = T('Done'), T_RANGE = T('Range'), T_ANY = T('Any');
+  var GENERIC = ['List', 'Map', 'Table'], fieldT = {}, proofs = [];
+  function tstr(t) {
+    if (!t) return '?';
+    if (t.n === 'Range') return 'ein Bereich (a..b)';
+    if (!t.a) return t.n;
+    return t.n + '<' + t.a.map(function (x) { return typeof x === 'number' ? String(x) : tstr(x); }).join(', ') + '>';
+  }
+  function upperName(name, what, line) {
+    if (/^[A-Z]/.test(name)) return;
+    var fix = name.charAt(0).toUpperCase() + name.slice(1);
+    err(line, what + ' beginnen mit einem Großbuchstaben' + (fix !== name ? ': ' + fix + ' statt ' + name : ', ' + name + ' tut das nicht') + '.');
+  }
+  function lowerName(name, what, line) {
+    if (!/^[A-Z]/.test(name)) return;
+    err(line, what + ' beginnen mit einem Kleinbuchstaben: ' + name.charAt(0).toLowerCase() + name.slice(1) + ' statt ' + name + '.');
+  }
+  function isRefined(t) { return !!(t && !t.a && types[t.n] && types[t.n].kind === 'refined'); }
+  function root(t) {
+    var d = 0;
+    while (isRefined(t) && d++ < 25) t = T(types[t.n].base);
+    return t;
+  }
+  function sameT(a, b) {
+    if (!a || !b) return true;
+    if (a.n !== b.n || !a.a !== !b.a) return false;
+    if (!a.a) return true;
+    if (a.a.length !== b.a.length) return false;
+    return a.a.every(function (x, i) {
+      var y = b.a[i];
+      if (x === null || y === null) return true;
+      if (typeof x === 'number' || typeof y === 'number') return x === y;
+      return sameT(x, y);
+    });
+  }
+  /* Passt ein Wert vom Typ from dorthin, wo to erwartet wird? Eingeschränkte Typen passen an ihre Grundtypen, nie umgekehrt. */
+  function assignable(from, to) {
+    if (!from || !to || to.n === 'Any') return true;
+    if (to.a) {
+      if (!from.a) return false;
+      if (to.n === 'List' && (from.n === 'List' || from.n === 'Table')) return assignable(from.a[0], to.a[0]);
+      if (from.n !== to.n) return false;
+      if (to.n === 'Table') return (from.a[1] === null || to.a[1] === null || from.a[1] === to.a[1]) && assignable(from.a[0], to.a[0]);
+      return sameT(from, to);
+    }
+    if (from.a) return false;
+    if (from.n === to.n) return true;
+    var d = 0;
+    while (isRefined(from) && d++ < 25) { from = T(types[from.n].base); if (from.n === to.n) return true; }
+    return false;
+  }
+  function comparable(a, b) { return !a || !b || assignable(a, b) || assignable(b, a) || sameT(root(a), root(b)); }
+  function constOf(e) {
+    if (e.k === 'Num' || e.k === 'Bool') return { v: e.v };
+    if (e.k === 'Str' && e.parts.length === 1 && e.parts[0].text !== undefined) return { v: e.parts[0].text };
+    var n = fold(e);
+    return n === null ? null : { v: n };
+  }
+  /* Der einzige Beweis, den der Prototyp führt: ein fester Wert wird beim Prüfen gegen die Einschränkung gerechnet. */
+  function provable(e, from, to, line) {
+    if (!e || !to) return false;
+    if (to.a) {
+      if (e.k !== 'List' || (to.n !== 'List' && to.n !== 'Table')) return false;
+      if (to.n === 'Table' && to.a[1] !== null && to.a[1] !== e.items.length) return false;
+      return e.items.every(function (it) { return assignable(it.ty, to.a[0]) || provable(it, it.ty, to.a[0], it.line || line); });
+    }
+    if (!isRefined(to)) return false;
+    var c = constOf(e);
+    if (!c || !assignable(from, root(to))) return false;
+    proofs.push({ v: c.v, type: to.n, line: line });
+    return true;
+  }
+  function fits(e, from, to, line, what) {
+    if (assignable(from, to) || provable(e, from, to, line)) return true;
+    var hint = '';
+    if (isRefined(to) && from && !from.a && sameT(root(from), root(to)))
+      hint = ' Ein Wert vom Typ ' + to.n + ' entsteht nur durch Prüfen: check wert as ' + to.n + ' otherwise return ...';
+    err(line, what + ' erwartet ' + tstr(to) + ', vorhanden ist ' + tstr(from) + '.' + hint);
+    return false;
+  }
+  /* Operanden: ungeprüfte Werte sind schon gemeldet, ihr Typ zählt erst nach check. */
+  function expectT(r, t, line, what) {
+    if (!r.type || r.taint === 'unchecked' || assignable(r.type, t)) return true;
+    err(line, what + ' erwartet ' + tstr(t) + ', vorhanden ist ' + tstr(r.type) + '.');
+    return false;
+  }
+  function isText(r) { return !!r.type && r.taint !== 'unchecked' && assignable(r.type, T_TEXT); }
+  function resolve(ref, line) {
+    if (!ref) return null;
+    line = ref.line || line;
+    var b = ref.base, a = ref.args || [];
+    if (GENERIC.indexOf(b) >= 0) {
+      var usage = b === 'List' ? 'List braucht genau einen Typ, zum Beispiel List<Int>.'
+        : b === 'Table' ? 'Table braucht Typ und Größe, zum Beispiel Table<Task, 8>.' : 'Map braucht zwei Typen, zum Beispiel Map<Text, Int>.';
+      var shape = b === 'List' ? a.length === 1 && typeof a[0] !== 'number'
+        : b === 'Table' ? a.length === 2 && typeof a[0] !== 'number' && typeof a[1] === 'number'
+        : a.length === 2 && typeof a[0] !== 'number' && typeof a[1] !== 'number';
+      if (!shape) { err(line, usage); return null; }
+      var parts = a.map(function (x) {
+        if (typeof x === 'number') return x;
+        var r = resolve(x, line);
+        if (r && isRes(r.n)) err(line, 'Ressourcen in Listen, Tabellen und Maps kennt der Prototyp noch nicht.');
+        return r;
+      });
+      return T(b, parts);
+    }
+    if (a.length) { err(line, b + ' hat keine Angaben in spitzen Klammern. Generisch sind nur List, Map und Table.'); return null; }
+    if (BASE_TYPES.indexOf(b) >= 0 || types[b] || enums[b]) return T(b);
+    var cap = b.charAt(0).toUpperCase() + b.slice(1);
+    err(line, 'Der Typ ' + b + ' ist nicht bekannt.' + (cap !== b && (BASE_TYPES.indexOf(cap) >= 0 || types[cap] || enums[cap]) ? ' Typen beginnen groß: ' + cap + '.' : ''));
+    return null;
+  }
+  function fieldType(t, name, line, store) {
+    if (!t) return null;
+    var td = !t.a && types[t.n];
+    if (td && td.kind !== 'refined') {
+      if (Object.prototype.hasOwnProperty.call(fieldT[t.n] || {}, name)) return fieldT[t.n][name];
+      err(line, t.n + ' hat kein Feld ' + name + '. Vorhanden: ' + td.fields.map(function (f) { return f.name; }).join(', ') + '.');
+      return null;
+    }
+    var rt = root(t);
+    if (!store && name === 'length' && (rt.n === 'Text' || rt.n === 'List' || rt.n === 'Table')) return T_INT;
+    if (!t.a && enums[t.n]) err(line, 'Die Angaben einer Variante von ' + t.n + ' erreicht man über match, nicht mit .' + name + '.');
+    else err(line, 'Ein Wert vom Typ ' + tstr(t) + ' hat kein Feld ' + name + '. Felder haben nur Datensätze und Ressourcen.');
+    return null;
+  }
+  function elemType(t, line) {
+    if (!t) return null;
+    if (t.a && (t.n === 'List' || t.n === 'Table')) return t.a[0];
+    err(line, 'Eine Stelle [..] gibt es nur an Tabellen und Listen, vorhanden ist ' + tstr(t) + '.');
+    return null;
+  }
+  function unify(a, b, line) {
+    if (!a) return b;
+    if (!b || assignable(b, a)) return a;
+    if (assignable(a, b)) return b;
+    if (sameT(root(a), root(b))) return root(a);
+    err(line, 'Eine Liste enthält nur Werte eines Typs, hier stehen ' + tstr(a) + ' und ' + tstr(b) + '.');
+    return a;
+  }
+  var LIB = { Any: T_ANY, Int: T_INT, Text: T_TEXT, Bool: T_BOOL, Done: T_DONE, Ints: T('List', [T_INT]), List: T('List', [null]) };
 
   prog.types.forEach(function (t) {
-    if (types[t.name] || BASE_TYPES.indexOf(t.name) >= 0) err(t.line, 'Der Typ ' + t.name + ' ist schon vergeben.');
+    if (types[t.name] || BASE_TYPES.indexOf(t.name) >= 0 || GENERIC.indexOf(t.name) >= 0 || enums[t.name]) err(t.line, 'Der Typ ' + t.name + ' ist schon vergeben.');
+    upperName(t.name, 'Typnamen', t.line);
     types[t.name] = t;
   });
   prog.enums.forEach(function (e) {
-    if (enums[e.name] || types[e.name]) err(e.line, 'Der Name ' + e.name + ' ist schon vergeben.');
+    if (enums[e.name] || types[e.name] || BASE_TYPES.indexOf(e.name) >= 0 || GENERIC.indexOf(e.name) >= 0) err(e.line, 'Der Name ' + e.name + ' ist schon vergeben.');
+    upperName(e.name, 'Typnamen', e.line);
     enums[e.name] = e.variants.map(function (v) { return v.name; });
     e.variants.forEach(function (v) {
       if (variants[v.name]) err(v.line, 'Die Variante ' + v.name + ' ist schon vergeben.');
-      variants[v.name] = { enumName: e.name, fields: v.fields };
+      upperName(v.name, 'Varianten', v.line);
+      v.fields.forEach(function (fname) { lowerName(fname, 'Feldnamen', v.line); });
+      variants[v.name] = { enumName: e.name, fields: v.fields, ftypes: v.ftypes, ftypesT: [], line: v.line };
     });
   });
   function isRes(name) { return !!(name && types[name] && types[name].kind === 'resource'); }
@@ -911,6 +1067,27 @@ function checkProgram(prog) {
     if (funcs[f.name]) err(f.line, 'Die Funktion ' + f.name + ' gibt es schon.');
     funcs[f.name] = f;
     if (f.errType && !enums[f.errType]) err(f.line, 'Der Fehlertyp ' + f.errType + ' ist nicht bekannt. Als enum anlegen.');
+    lowerName(f.name, 'Funktionsnamen', f.line);
+    f.rights.forEach(function (r) { upperName(r.name, 'Rechte', r.line); });
+  });
+  /* Alle Typangaben auflösen, bevor Rümpfe geprüft werden. */
+  prog.types.forEach(function (t) {
+    if (t.kind !== 'record' && t.kind !== 'resource') return;
+    var ft = {};
+    t.fields.forEach(function (f) {
+      lowerName(f.name, 'Feldnamen', f.type.line || t.line);
+      if (Object.prototype.hasOwnProperty.call(ft, f.name)) err(f.type.line || t.line, 'Das Feld ' + f.name + ' steht doppelt in ' + t.name + '.');
+      ft[f.name] = resolve(f.type, t.line);
+    });
+    if (fieldT[t.name] === undefined) fieldT[t.name] = ft;
+  });
+  Object.keys(variants).forEach(function (vn) {
+    var vd = variants[vn];
+    if (vd.ftypes) vd.ftypesT = vd.ftypes.map(function (r) { return resolve(r, vd.line); });
+  });
+  prog.funcs.forEach(function (f) {
+    f.paramT = f.params.map(function (p) { lowerName(p.name, 'Parameter', p.line); return resolve(p.tref, p.line); });
+    f.retT = f.ret ? resolve(f.retRef, f.line) : T_DONE;
   });
   function checkable(name, line, depth) {
     if (BASE_TYPES.indexOf(name) >= 0) return true;
@@ -924,14 +1101,15 @@ function checkProgram(prog) {
   var report = { program: [], functions: [] };
 
   function join(a, b) { if (a === 'secret' || b === 'secret') return 'secret'; if (a === 'unchecked' || b === 'unchecked') return 'unchecked'; return 'clean'; }
-  function R(taint, fallible, lin, region, ref) { return { taint: taint || 'clean', fallible: fallible || null, lin: lin || null, region: region || null, ref: ref || null }; }
+  function R(taint, fallible, lin, region, ref, type) { return { taint: taint || 'clean', fallible: fallible || null, lin: lin || null, region: region || null, ref: ref || null, type: type || null }; }
+  function RT(type, taint) { return R(taint, null, null, null, null, type); }
   function mkctx(fn, pure) { return { fn: fn, needed: [], reveals: pure ? null : [], pure: pure || null, lin: [], scopes: [[]], regions: [], loop: 0 }; }
 
   function declare(env, ctx, name, p) {
     if (Object.prototype.hasOwnProperty.call(env, name)) err(p.line, 'Der Name ' + name + ' ist in diesem Block schon vergeben.');
     var v = { name: name, taint: p.taint || 'clean', mut: !!p.mut, param: !!p.param, lin: p.lin || null, own: !!p.own,
       canChange: !!p.canChange, region: p.region || null, rdepth: ctx.regions.length, loopDepth: ctx.loop,
-      state: 'live', movedLine: 0, line: p.line, inScope: true };
+      state: 'live', movedLine: 0, line: p.line, inScope: true, type: p.type || null };
     env[name] = v;
     ctx.scopes[ctx.scopes.length - 1].push(v);
     if (v.lin) ctx.lin.push(v);
@@ -966,8 +1144,52 @@ function checkProgram(prog) {
   function escapes(region, target, ctx) { return target.rdepth <= ctx.regions.indexOf(region); }
 
   function analyze(e, env, ctx) {
+    var r = analyze0(e, env, ctx);
+    e.ty = r.type;
+    return r;
+  }
+  function binType(e, l, r) {
+    var op = e.op, line = e.line;
+    switch (op) {
+      case 'and': case 'or':
+        expectT(l, T_BOOL, line, 'Links von ' + op); expectT(r, T_BOOL, line, 'Rechts von ' + op);
+        return T_BOOL;
+      case '+':
+        if (isText(l) || isText(r)) {
+          if (!isText(l) && l.type && l.taint !== 'unchecked' || !isText(r) && r.type && r.taint !== 'unchecked')
+            err(line, 'Mit + lassen sich ' + tstr(l.type) + ' und ' + tstr(r.type) + ' nicht verbinden. Den Wert in den Text einsetzen: "... {wert}"');
+          return T_TEXT;
+        }
+        expectT(l, T_INT, line, 'Links von +'); expectT(r, T_INT, line, 'Rechts von +');
+        return T_INT;
+      case '-': case '*': case '/': case '%':
+        expectT(l, T_INT, line, 'Links von ' + op); expectT(r, T_INT, line, 'Rechts von ' + op);
+        return T_INT;
+      case '..':
+        expectT(l, T_INT, line, 'Die untere Grenze'); expectT(r, T_INT, line, 'Die obere Grenze');
+        return T_RANGE;
+      case '<': case '<=': case '>': case '>=':
+        expectT(l, T_INT, line, 'Links von ' + op); expectT(r, T_INT, line, 'Rechts von ' + op);
+        return T_BOOL;
+      case '==': case '!=':
+        if (l.taint !== 'unchecked' && r.taint !== 'unchecked' && !comparable(l.type, r.type))
+          err(line, 'Verglichen werden ' + tstr(l.type) + ' und ' + tstr(r.type) + '. Beide Seiten brauchen denselben Typ.');
+        return T_BOOL;
+      case 'in':
+        if (r.type && r.taint !== 'unchecked') {
+          if (r.type.n === 'Range') expectT(l, T_INT, line, 'Links von in');
+          else if (r.type.a && (r.type.n === 'List' || r.type.n === 'Table')) {
+            if (l.taint !== 'unchecked' && !comparable(l.type, r.type.a[0])) err(line, 'Links von in steht ' + tstr(l.type) + ', die Liste enthält ' + tstr(r.type.a[0]) + '.');
+          } else err(line, 'Rechts von in steht ein Bereich (a..b) oder eine Liste, vorhanden ist ' + tstr(r.type) + '.');
+        }
+        return T_BOOL;
+    }
+    return null;
+  }
+  function analyze0(e, env, ctx) {
     switch (e.k) {
-      case 'Num': case 'Bool': return R();
+      case 'Num': return RT(T_INT);
+      case 'Bool': return RT(T_BOOL);
       case 'Str': {
         var taint = 'clean';
         e.parts.forEach(function (p) {
@@ -976,26 +1198,31 @@ function checkProgram(prog) {
           if (r.taint === 'secret') err(e.line, 'Ein Geheimnis darf nicht in einen Text eingesetzt werden.');
           else taint = join(taint, r.taint);
         });
-        return R(taint);
+        return RT(T_TEXT, taint);
       }
       case 'Var': {
         var v = env[e.name];
         if (!v) { err(e.line, 'Der Name ' + e.name + ' ist hier nicht bekannt.'); return R(); }
         if (v.lin && v.state === 'moved') err(e.line, e.name + ' wurde in Zeile ' + v.movedLine + ' abgegeben und ist hier nicht mehr vorhanden.');
-        return R(v.taint, null, v.lin, v.region, v);
+        return R(v.taint, null, v.lin, v.region, v, v.type);
       }
-      case 'Field': return R(value(e.obj, env, ctx).taint);
+      case 'Field': {
+        var fo = value(e.obj, env, ctx);
+        return RT(fieldType(fo.type, e.name, e.line), fo.taint);
+      }
       case 'Index': {
         var io = value(e.obj, env, ctx), ii = value(e.idx, env, ctx);
         if (ii.taint === 'unchecked') err(e.line, 'Ungeprüfter Wert als Stelle einer Tabelle. Erst mit check prüfen.');
         if (ii.taint === 'secret') err(e.line, 'Ein Geheimnis darf nicht als Stelle dienen. Der Speicherzugriff würde es verraten.');
-        return R(io.taint, null, null, io.region);
+        expectT(ii, T_INT, e.line, 'Die Stelle einer Tabelle');
+        return R(io.taint, null, null, io.region, null, elemType(io.type, e.line));
       }
       case 'Mode': err(e.line, e.mode + ' steht nur direkt vor einem Argument beim Aufruf einer eigenen Funktion.'); return analyze(e.e, env, ctx);
       case 'Un': {
         var u = value(e.e, env, ctx);
         if (u.taint === 'unchecked') err(e.line, 'Ungeprüfter Wert in einer Berechnung. Erst mit check prüfen.');
-        return R(u.taint === 'secret' ? 'secret' : 'clean');
+        expectT(u, e.op === 'not' ? T_BOOL : T_INT, e.line, e.op === 'not' ? 'not' : 'Das Vorzeichen -');
+        return RT(e.op === 'not' ? T_BOOL : T_INT, u.taint === 'secret' ? 'secret' : 'clean');
       }
       case 'Bin': {
         var l = value(e.l, env, ctx), r2 = value(e.r, env, ctx);
@@ -1003,18 +1230,19 @@ function checkProgram(prog) {
         var sec = l.taint === 'secret' || r2.taint === 'secret';
         if (sec && ['==', '!=', '<', '<=', '>', '>=', 'in', 'and', 'or'].indexOf(e.op) >= 0) {
           err(e.line, 'Ein Vergleich mit einem Geheimnis verrät es über die Laufzeit.');
-          return R();
+          return RT(T_BOOL);
         }
-        return R(sec ? 'secret' : 'clean');
+        return RT(binType(e, l, r2), sec ? 'secret' : 'clean');
       }
       case 'List': {
-        var lt = 'clean', lr = null;
+        var lt = 'clean', lr = null, el = null;
         e.items.forEach(function (it) {
           var a = value(it, env, ctx);
           if (a.lin) err(it.line || e.line, 'Ressourcen in Listen kennt der Prototyp noch nicht.');
           lt = join(lt, a.taint); lr = lr || a.region;
+          el = unify(el, a.type, it.line || e.line);
         });
-        return R(lt, null, null, lr);
+        return R(lt, null, null, lr, null, T('Table', [el, e.items.length]));
       }
       case 'Call': {
         var f = funcs[e.name];
@@ -1026,6 +1254,10 @@ function checkProgram(prog) {
           if (!p) return;
           if (at.taint === 'unchecked' && p.taint !== 'unchecked') err(ln, 'Ungeprüfter Wert an ' + e.name + '(' + p.name + '). Erst mit check prüfen oder den Parameter als unchecked markieren.');
           if (at.taint === 'secret' && p.taint !== 'secret') err(ln, 'Geheimnis an ' + e.name + '(' + p.name + '). Der Parameter ist nicht als secret markiert.');
+          if (at.taint !== 'unchecked' || p.taint === 'unchecked') {
+            if (p.mode !== 'change') fits(inner, at.type, f.paramT[i], ln, e.name + '(' + p.name + ')');
+            else if (!sameT(at.type, f.paramT[i])) err(ln, e.name + '(change ' + p.name + ') erwartet genau ' + tstr(f.paramT[i]) + ', vorhanden ist ' + tstr(at.type) + '. Bei change müssen die Typen übereinstimmen.');
+          }
           if (p.mode !== marker) {
             if (p.mode === 'read') err(ln, e.name + ' liest ' + p.name + ' nur. Das Wort ' + marker + ' gehört hier nicht hin.');
             else err(ln, e.name + ' erwartet beim Aufruf "' + p.mode + ' ..." für ' + p.name + ', damit sichtbar ist, was mit dem Wert geschieht.');
@@ -1043,7 +1275,7 @@ function checkProgram(prog) {
           }
         });
         f.rights.forEach(function (r) { need(ctx, r, e.line, 'Aufruf von ' + f.name); });
-        return R(f.retTaint, f.errType, isRes(f.ret) ? f.ret : null);
+        return R(f.retTaint, f.errType, isRes(f.ret) ? f.ret : null, null, null, f.retT);
       }
       case 'MCall': {
         var q = e.mod + '.' + e.fn, b = BUILTINS[q];
@@ -1055,9 +1287,12 @@ function checkProgram(prog) {
           if (!a0 || a0.k !== 'Str' || a0.parts.length !== 1 || a0.parts[0].text === undefined) err(e.line, 'Das erste Argument von ' + q + ' muss im Prototyp ein fester Text sein, damit das Recht prüfbar ist.');
           else arg = a0.parts[0].text;
         }
-        e.args.forEach(function (a) {
+        var argT = [];
+        e.args.forEach(function (a, i) {
           if (a.k === 'Mode') { err(a.line || e.line, 'take und change gibt es nur bei eigenen Funktionen, nicht bei ' + q + '.'); a = a.e; }
           var at = value(a, env, ctx);
+          argT.push(at.type);
+          if (b.p[i] && at.taint !== 'unchecked') fits(a, at.type, LIB[b.p[i]], a.line || e.line, q + ' (Argument ' + (i + 1) + ')');
           if (at.taint === 'unchecked') err(a.line || e.line, 'Ungeprüfter Wert darf nicht an ' + q + ' gehen. Erst mit check prüfen.');
           if (at.taint === 'secret' && !b.acceptsSecret) err(a.line || e.line, 'Ein Geheimnis darf nicht an ' + q + ' gehen.');
           if (at.lin) err(a.line || e.line, 'Eine Ressource kann nicht an ' + q + ' gehen.');
@@ -1067,7 +1302,9 @@ function checkProgram(prog) {
           var addr = fold(e.args[0]);
           need(ctx, addr === null ? { name: b.right } : { name: b.right, lo: addr, hi: addr }, e.line, q);
         } else if (b.right) need(ctx, { name: b.right, arg: b.lit ? arg : null }, e.line, q);
-        return R(b.ret, b.fallible || null);
+        var bt = b.r === 'Elem' ? (argT[0] && argT[0].a ? argT[0].a[0] : null)
+          : b.r === 'Fill' ? T('Table', [argT[1] || null, e.args[0] ? fold(e.args[0]) : null]) : LIB[b.r];
+        return R(b.ret, b.fallible || null, null, null, null, bt);
       }
       case 'Variant': {
         var vd = variants[e.name];
@@ -1075,12 +1312,13 @@ function checkProgram(prog) {
           if (types[e.name] && types[e.name].kind !== 'refined') err(e.line, 'Ein Datensatz wird mit geschweiften Klammern gebaut: ' + e.name + ' { ... }');
           else err(e.line, 'Der Name ' + e.name + ' ist nicht bekannt.');
         } else if (e.args.length !== vd.fields.length) err(e.line, e.name + ' erwartet ' + vd.fields.length + ' Angaben, übergeben wurden ' + e.args.length + '.');
-        e.args.forEach(function (a) {
+        e.args.forEach(function (a, i) {
           var at = value(a, env, ctx);
           if (at.taint !== 'clean') err(a.line || e.line, 'In ' + e.name + '(...) stehen nur geprüfte, nicht geheime Werte.');
+          else if (vd && i < vd.fields.length) fits(a, at.type, vd.ftypesT[i], a.line || e.line, 'Die Angabe ' + vd.fields[i] + ' von ' + e.name);
           if (at.lin) err(a.line || e.line, 'Ressourcen in Varianten kennt der Prototyp noch nicht.');
         });
-        return R();
+        return RT(vd ? T(vd.enumName) : null);
       }
       case 'Record': {
         var td = types[e.type], rt = 'clean', rr = null;
@@ -1093,17 +1331,20 @@ function checkProgram(prog) {
         e.fields.forEach(function (fl) {
           var at = value(fl.expr, env, ctx);
           if (at.taint === 'unchecked') err(fl.expr.line || e.line, 'Ungeprüfter Wert im Feld ' + fl.name + '. Erst mit check prüfen.');
+          else if (td && td.kind !== 'refined' && Object.prototype.hasOwnProperty.call(fieldT[e.type] || {}, fl.name))
+            fits(fl.expr, at.type, fieldT[e.type][fl.name], fl.expr.line || e.line, 'Das Feld ' + fl.name + ' von ' + e.type);
           if (at.lin) err(fl.expr.line || e.line, 'Das Feld ' + fl.name + ' kann im Prototyp keine Ressource aufnehmen.');
           rt = join(rt, at.taint === 'secret' ? 'secret' : 'clean');
           rr = rr || at.region;
         });
-        return R(rt, null, td && td.kind === 'resource' ? e.type : null, rr);
+        return R(rt, null, td && td.kind === 'resource' ? e.type : null, rr, null, td && td.kind !== 'refined' ? T(e.type) : null);
       }
       case 'Check': {
         var c = value(e.e, env, ctx);
         if (c.taint === 'secret') err(e.line, 'check ist für ungeprüfte Werte gedacht, nicht für Geheimnisse.');
-        checkable(e.type, e.line);
-        return R('clean', 'CheckFailed');
+        var cr = root(c.type);
+        if (cr && BASE_TYPES.indexOf(cr.n) < 0) err(e.line, 'check prüft nur einfache Werte (Int, Text, Bool), vorhanden ist ' + tstr(c.type) + '.');
+        return R('clean', 'CheckFailed', null, null, null, checkable(e.type, e.line) ? T(e.type) : null);
       }
       case 'Try': {
         var inner = analyze(e.e, env, ctx);
@@ -1111,20 +1352,20 @@ function checkProgram(prog) {
         else if (!ctx.fn || !ctx.fn.errType) err(e.line, 'try gibt den Fehler weiter. Dafür muss die Funktion selbst scheitern können: -> Typ fails Fehlertyp');
         else if (inner.fallible !== ctx.fn.errType) err(e.line, 'try würde ' + inner.fallible + ' weitergeben, ' + ctx.fn.name + ' verspricht aber ' + ctx.fn.errType + '. Mit otherwise return ... umwandeln.');
         leakCheck(ctx, e.line, 'try');
-        return R(inner.taint, null, inner.lin, inner.region);
+        return R(inner.taint, null, inner.lin, inner.region, null, inner.type);
       }
       case 'RegionNew': {
         if (ctx.regions.indexOf(e.region) < 0) err(e.line, 'Die Region ' + e.region + ' ist hier nicht offen.');
         var rn = value(e.e, env, ctx);
         if (rn.lin) err(e.line, 'Ressourcen gehören im Prototyp nicht in eine Region.');
-        return R(rn.taint, null, null, e.region);
+        return R(rn.taint, null, null, e.region, null, rn.type);
       }
-      case 'Secret': value(e.e, env, ctx); return R('secret');
+      case 'Secret': return RT(value(e.e, env, ctx).type, 'secret');
       case 'Reveal': {
         var s = value(e.e, env, ctx);
         if (s.taint !== 'secret') err(e.line, 'reveal braucht ein Geheimnis. Dieser Wert ist keines.');
         if (ctx.reveals) ctx.reveals.push({ text: e.text, reason: e.reason, line: e.line });
-        return R();
+        return RT(s.type);
       }
     }
     return R();
@@ -1144,6 +1385,11 @@ function checkProgram(prog) {
     if (r.taint === 'unchecked' && fn.retTaint !== 'unchecked') err(line, fn.name + ' gibt einen ungeprüften Wert zurück. Entweder vorher mit check prüfen oder den Rückgabetyp als unchecked markieren.');
     if (r.taint === 'secret' && fn.retTaint !== 'secret') err(line, fn.name + ' gibt ein Geheimnis zurück, der Rückgabetyp ist aber nicht als secret markiert.');
     if (r.region) err(line, 'Der Wert gehört zur Region ' + r.region + ' und darf den Block nicht verlassen.');
+    var isErr = !!(fn.errType && r.type && !r.type.a && r.type.n === fn.errType);
+    if (!isErr && !(r.taint === 'unchecked' && fn.retTaint !== 'unchecked')) {
+      if (!fn.ret && r.type && !assignable(r.type, T_DONE)) err(line, fn.name + ' gibt laut Kopf nichts zurück, hier steht aber ein Wert vom Typ ' + tstr(r.type) + '. Im Kopf ergänzen: -> ' + tstr(root(r.type)));
+      else fits(e, r.type, fn.retT, line, 'Die Rückgabe von ' + fn.name);
+    }
     var except = null;
     if (r.lin) {
       if (!isRes(fn.ret)) err(line, fn.name + ' gibt eine Ressource (' + r.lin + ') zurück, der Rückgabetyp ist aber keine.');
@@ -1167,7 +1413,7 @@ function checkProgram(prog) {
       var st = snapshot(ctx);
       if (other.k === 'ret') checkReturn(other.e, env, ctx, line);
       else {
-        var od = block(other.body, env, ctx, function (local) { declare(local, ctx, other.name, { taint: 'clean', line: other.line }); });
+        var od = block(other.body, env, ctx, function (local) { lowerName(other.name, 'Variablen', other.line); declare(local, ctx, other.name, { taint: 'clean', line: other.line, type: r.fallible ? T(r.fallible) : null }); });
         if (!od) err(other.line, 'Der otherwise-Block muss mit return enden, sonst fehlt danach ein Wert.');
       }
       restore(st);
@@ -1204,7 +1450,10 @@ function checkProgram(prog) {
       case 'Let': {
         var r = handled(s.e, s.other, env, ctx, s.line);
         if (r.lin && s.e.k === 'Var' && r.ref) moveVar(r.ref, s.line, ctx);
-        declare(env, ctx, s.name, { taint: r.taint, mut: s.mut, lin: r.lin, own: true, canChange: s.mut, region: r.region, line: s.line });
+        lowerName(s.name, 'Variablen', s.line);
+        var lty = r.type, ann = s.type ? resolve(s.type, s.line) : null;
+        if (ann) { fits(s.e, r.type, ann, s.line, 'Die Variable ' + s.name); lty = ann; }
+        declare(env, ctx, s.name, { taint: r.taint, mut: s.mut, lin: r.lin, own: true, canChange: s.mut, region: r.region, line: s.line, type: lty });
         break;
       }
       case 'Assign': {
@@ -1214,6 +1463,7 @@ function checkProgram(prog) {
         if (v.param) { err(s.line, 'Ein Parameter wird nicht neu zugewiesen. Bei change die Felder ändern, zum Beispiel ' + s.name + '.feld = ...'); break; }
         if (!v.mut) { err(s.line, s.name + ' wurde mit let angelegt und ist unveränderlich. Mit var anlegen, wenn sich der Wert ändern soll.'); break; }
         if (v.lin && v.state === 'live') err(s.line, s.name + ' enthält noch eine unverbrauchte Ressource und kann nicht überschrieben werden.');
+        if (v.type) fits(s.e, a.type, v.type, s.line, 'Die Variable ' + s.name); else v.type = a.type;
         if (a.region) { if (escapes(a.region, v, ctx)) err(s.line, 'Der Wert gehört zur Region ' + a.region + ' und darf nicht in ' + s.name + ' landen, das außerhalb angelegt wurde.'); else v.region = a.region; }
         if (a.lin) {
           if (s.e.k === 'Var' && a.ref) moveVar(a.ref, s.line, ctx);
@@ -1230,6 +1480,7 @@ function checkProgram(prog) {
         if (fv.lin && fv.state === 'moved') err(s.line, s.name + ' wurde in Zeile ' + fv.movedLine + ' abgegeben und ist hier nicht mehr vorhanden.');
         if (!fv.canChange) err(s.line, s.name + ' darf hier nicht verändert werden. Mit var anlegen oder als change-Parameter erhalten.');
         if (fa.taint === 'unchecked') err(s.line, 'Ungeprüfter Wert im Feld ' + s.field + '. Erst mit check prüfen.');
+        else fits(s.e, fa.type, fieldType(fv.type, s.field, s.line, true), s.line, 'Das Feld ' + s.field + ' von ' + s.name);
         if (fa.taint === 'secret') fv.taint = 'secret';
         if (fa.lin) err(s.line, 'Das Feld ' + s.field + ' kann im Prototyp keine Ressource aufnehmen.');
         if (fa.region && escapes(fa.region, fv, ctx)) err(s.line, 'Der Wert gehört zur Region ' + fa.region + ' und darf nicht in ' + s.name + ' landen, das außerhalb angelegt wurde.');
@@ -1242,7 +1493,11 @@ function checkProgram(prog) {
         if (!sv.canChange) err(s.line, s.name + ' darf hier nicht verändert werden. Mit var anlegen oder als change-Parameter erhalten.');
         if (si.taint === 'unchecked') err(s.line, 'Ungeprüfter Wert als Stelle einer Tabelle. Erst mit check prüfen.');
         if (si.taint === 'secret') err(s.line, 'Ein Geheimnis darf nicht als Stelle dienen. Der Speicherzugriff würde es verraten.');
+        expectT(si, T_INT, s.line, 'Die Stelle einer Tabelle');
+        var slotT = elemType(sv.type, s.line);
+        if (s.field) slotT = fieldType(slotT, s.field, s.line, true);
         if (sa.taint === 'unchecked') err(s.line, 'Ungeprüfter Wert in einer Tabelle. Erst mit check prüfen.');
+        else fits(s.e, sa.type, slotT, s.line, s.field ? 'Das Feld ' + s.field : 'Die Stelle von ' + s.name);
         if (sa.taint === 'secret') sv.taint = 'secret';
         if (sa.lin) err(s.line, 'Ressourcen in Tabellen kennt der Prototyp noch nicht.');
         if (sa.region && escapes(sa.region, sv, ctx)) err(s.line, 'Der Wert gehört zur Region ' + sa.region + ' und darf nicht in ' + s.name + ' landen, das außerhalb angelegt wurde.');
@@ -1257,7 +1512,10 @@ function checkProgram(prog) {
         break;
       }
       case 'Return': {
-        if (!s.e) { leakCheck(ctx, s.line, 'return'); break; }
+        if (!s.e) {
+          if (ctx.fn.ret && ctx.fn.retT && ctx.fn.retT.n !== 'Done') err(s.line, 'return braucht hier einen Wert vom Typ ' + ctx.fn.ret + '.');
+          leakCheck(ctx, s.line, 'return'); break;
+        }
         if (s.other) retValue(s.e, handled(s.e, s.other, env, ctx, s.line), ctx, s.line);
         else checkReturn(s.e, env, ctx, s.line);
         break;
@@ -1275,12 +1533,16 @@ function checkProgram(prog) {
         var m = value(s.e, env, ctx);
         if (m.taint === 'unchecked') err(s.line, 'match hängt von einem ungeprüften Wert ab. Erst mit check prüfen.');
         if (m.taint === 'secret') err(s.line, 'Eine Verzweigung darf nicht von einem Geheimnis abhängen.');
-        var enumName = null, covered = {}, base = snapshot(ctx), branches = [];
+        var enumName = null, covered = {}, base = snapshot(ctx), branches = [], known = false;
+        if (m.type && m.taint !== 'unchecked') {
+          if (!m.type.a && enums[m.type.n]) { enumName = m.type.n; known = true; }
+          else err(s.line, 'match erwartet einen Wert einer Aufzählung, vorhanden ist ' + tstr(m.type) + '.');
+        }
         s.arms.forEach(function (arm) {
           var vd = variants[arm.name];
           if (!vd) err(arm.line, 'Die Variante ' + arm.name + ' ist nicht bekannt.');
           else {
-            if (enumName && vd.enumName !== enumName) err(arm.line, arm.name + ' gehört zu ' + vd.enumName + ', die anderen Zweige zu ' + enumName + '.');
+            if (enumName && vd.enumName !== enumName) err(arm.line, arm.name + ' gehört zu ' + vd.enumName + (known ? ', verglichen wird aber ein Wert vom Typ ' : ', die anderen Zweige zu ') + enumName + '.');
             enumName = enumName || vd.enumName;
             if (covered[arm.name]) err(arm.line, 'Der Zweig ' + arm.name + ' kommt doppelt vor.');
             covered[arm.name] = true;
@@ -1288,7 +1550,10 @@ function checkProgram(prog) {
           }
           restore(base);
           var d = block(arm.body, env, ctx, function (local) {
-            arm.binds.forEach(function (bn) { declare(local, ctx, bn, { taint: 'clean', line: arm.line }); });
+            arm.binds.forEach(function (bn, bi) {
+              lowerName(bn, 'Variablen', arm.line);
+              declare(local, ctx, bn, { taint: 'clean', line: arm.line, type: vd && vd.enumName === enumName ? vd.ftypesT[bi] : null });
+            });
           });
           branches.push({ div: d, st: snapshot(ctx) });
         });
@@ -1302,15 +1567,22 @@ function checkProgram(prog) {
       }
       case 'While': cond(s.cond, env, ctx); ctx.loop++; block(s.body, env, ctx); ctx.loop--; break;
       case 'For': {
-        var it = value(s.e, env, ctx);
+        var it = value(s.e, env, ctx), itT = null;
+        lowerName(s.name, 'Variablen', s.line);
+        if (it.type && it.taint !== 'unchecked') {
+          if (it.type.n === 'Range') itT = T_INT;
+          else if (it.type.a && (it.type.n === 'List' || it.type.n === 'Table')) itT = it.type.a[0];
+          else err(s.line, 'for läuft über einen Bereich (a..b) oder eine Liste, vorhanden ist ' + tstr(it.type) + '.');
+        }
         ctx.loop++;
-        block(s.body, env, ctx, function (local) { declare(local, ctx, s.name, { taint: it.taint, line: s.line }); });
+        block(s.body, env, ctx, function (local) { declare(local, ctx, s.name, { taint: it.taint, line: s.line, type: itT }); });
         ctx.loop--;
         break;
       }
       case 'Region': {
         if (ctx.regions.indexOf(s.name) >= 0) err(s.line, 'Die Region ' + s.name + ' ist schon offen.');
         if (env[s.name]) err(s.line, 'Der Name ' + s.name + ' ist schon vergeben.');
+        lowerName(s.name, 'Regionen', s.line);
         ctx.regions.push(s.name);
         block(s.body, env, ctx);
         ctx.regions.pop();
@@ -1327,29 +1599,31 @@ function checkProgram(prog) {
     var c = value(e, env, ctx);
     if (c.taint === 'unchecked') err(e.line, 'Die Bedingung hängt von einem ungeprüften Wert ab. Erst mit check prüfen.');
     if (c.taint === 'secret') err(e.line, 'Eine Verzweigung darf nicht von einem Geheimnis abhängen.');
+    expectT(c, T_BOOL, e.line, 'Die Bedingung');
   }
 
   prog.types.forEach(function (t) {
     if (t.kind === 'refined') {
       if (BASE_TYPES.indexOf(t.base) < 0) checkable(t.base, t.line);
       if (t.where) {
-        var c = value(t.where, { it: { taint: 'clean', state: 'live' } }, mkctx(null, 'Einschränkungen von Typen'));
+        var c = value(t.where, { it: { taint: 'clean', state: 'live', type: types[t.base] || BASE_TYPES.indexOf(t.base) >= 0 ? T(t.base) : null } }, mkctx(null, 'Einschränkungen von Typen'));
         if (c.taint !== 'clean') err(t.line, 'Die Einschränkung von ' + t.name + ' muss ein einfacher Wahrheitswert sein.');
+        else expectT(c, T_BOOL, t.line, 'Die Einschränkung von ' + t.name);
       }
     }
   });
 
   prog.funcs.forEach(function (f) {
     var env = {}, ctx = mkctx(f, null);
-    f.params.forEach(function (p) {
+    f.params.forEach(function (p, i) {
       declare(env, ctx, p.name, { taint: p.taint, param: true, lin: isRes(p.type) ? p.type : null,
-        own: p.mode === 'take', canChange: p.mode !== 'read', line: p.line });
+        own: p.mode === 'take', canChange: p.mode !== 'read', line: p.line, type: f.paramT[i] });
     });
     var cctx = mkctx(f, 'Verträge');
-    f.requires.forEach(function (c) { value(c.expr, Object.create(env), cctx); });
+    f.requires.forEach(function (c) { expectT(value(c.expr, Object.create(env), cctx), T_BOOL, c.line, 'requires'); });
     var eenv = Object.create(env);
-    eenv.result = { name: 'result', taint: f.retTaint, state: 'live', rdepth: 0, loopDepth: 0 };
-    f.ensures.forEach(function (c) { value(c.expr, eenv, cctx); });
+    eenv.result = { name: 'result', taint: f.retTaint, state: 'live', rdepth: 0, loopDepth: 0, type: f.retT };
+    f.ensures.forEach(function (c) { expectT(value(c.expr, eenv, cctx), T_BOOL, c.line, 'ensures'); });
     if (f.assembly) {
       if (!f.rights.some(function (d) { return d.name === 'Cpu'; })) err(f.line, 'Die assembly-Funktion ' + f.name + ' braucht uses Cpu.');
       if (!f.assumes.length) err(f.line, 'Die assembly-Funktion ' + f.name + ' braucht mindestens eine Annahme (assumes), weil niemand ihren Inhalt prüft.');
@@ -1359,6 +1633,7 @@ function checkProgram(prog) {
     }
     var div = block(f.body, env, ctx);
     closeScope(ctx.scopes[0], div);
+    if (!div && f.ret && f.retT && f.retT.n !== 'Done') err(f.line, f.name + ' verspricht ' + f.ret + ', der Rumpf kann aber ohne return enden. Am Ende einen Wert zurückgeben.');
 
     var used = {};
     ctx.needed.forEach(function (n) {
@@ -1389,6 +1664,8 @@ function checkProgram(prog) {
     if (main.params.length) err(main.line, 'main hat im Prototyp keine Parameter.');
     report.program = main.rights.map(fmtRight);
   }
+  /* Stehen schon Fehler im Programm, zählt nur ein eindeutiges Nein: Der Rest kann Folge der anderen Fehler sein. */
+  if (proofs.length) execute({ types: types, variants: variants, funcs: funcs }, '', proofs, errors.length > 0).forEach(function (x) { err(x.line, x.msg); });
   errors.sort(function (a, b) { return a.line - b.line; });
   return { errors: errors, warnings: warnings, report: report, types: types, variants: variants, funcs: funcs };
 }
@@ -1461,7 +1738,7 @@ function hash(s) {
   return ('0000000' + h.toString(16)).slice(-8);
 }
 
-function execute(info, worldText) {
+function execute(info, worldText, proofs, lenient) {
   var world = parseWorld(worldText), out = [], tables = {}, steps = 0, depth = 0;
   var mem = {}, serial = '', stack = [], memOther = 0, screenUsed = false;
   function hw(name, addr, line) {
@@ -1769,6 +2046,19 @@ function execute(info, worldText) {
     }
   }
 
+  if (proofs) return proofs.map(function (p) {
+    var t = types[p.type], why = t.whereText ? ' (' + t.whereText.replace(/\s+/g, ' ') + ')' : '';
+    steps = 0; depth = 0;
+    try {
+      if (convert(p.v, p.type, p.line) !== null) return null;
+      return { line: p.line, msg: show(p.v, true) + ' erfüllt die Einschränkung von ' + p.type + ' nicht' + why + '. Den Wert anpassen.' };
+    } catch (ex) {
+      if (lenient) return null;
+      if (ex instanceof RuntimeFail) return { line: p.line, msg: 'Ob ' + show(p.v, true) + ' ein ' + p.type + ' ist, lässt sich nicht ausrechnen: ' + ex.message };
+      if (ex instanceof RangeError) return { line: p.line, msg: 'Ob ' + show(p.v, true) + ' ein ' + p.type + ' ist, lässt sich nicht ausrechnen: zu tiefe Verschachtelung.' };
+      throw ex;
+    }
+  }).filter(Boolean);
   var res = { output: out, runtimeError: null, mainResult: null, mainFailed: false, screen: null };
   try {
     var r = call(funcs.main, [], funcs.main.line);
@@ -2316,6 +2606,37 @@ root.Latch = { run: run };
       '    let pin = secret 4711',
       '    Console.print(reveal pin',
       '        because "user must type it")',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: falscher Typ', world: '', code: [
+      'latch 1', '',
+      'type Age = Int',
+      '    where it in 0..150',
+      '',
+      'function greet(name: Text, age: Age)',
+      '    -> Text',
+      '{',
+      '    return "{name} ist {age}"',
+      '}',
+      '',
+      '// Rechnen ergibt Int, kein Age:',
+      'function next(age: Age) -> Age',
+      '{',
+      '    return age + 1',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    // Vertauscht:',
+      '    Console.print(greet(36, "Ada"))',
+      '',
+      '    // Feste Werte rechnet der',
+      '    // Prüfer nach, 200 passt nicht:',
+      '    Console.print(greet("Ada", 200))',
+      '',
+      '    // So geht es:',
+      '    Console.print(greet("Ada", 36))',
       '}'
     ].join('\n') },
     { title: 'Fehler: Speicher falsch benutzt', world: '', code: [

@@ -7,7 +7,7 @@ voreinander verantworten müssen, bis hinunter zum Betriebssystemkern.
 Stand: Prototyp 0.7. Ein Interpreter mit statischem Prüfer läuft im Browser ("Latch Prüfstand").
 Einen Compiler gibt es noch nicht.
 
-    node tests/run.js        # 78 Testprogramme
+    node tests/run.js        # 113 Testprogramme
     node tests/examples.js   # alle Beispiele der Seite
     python3 build.py         # baut site/index.html
 

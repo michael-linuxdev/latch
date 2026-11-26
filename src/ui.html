@@ -182,6 +182,9 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li><code>take</code> und <code>change</code> stehen am Parameter und beim Aufruf. <code>change</code> verlangt eine mit <code>var</code> angelegte Variable.</li>
             <li><code>region</code>: Was mit <code>name.new(…)</code> entsteht, darf den Block nicht verlassen.</li>
             <li><code>match</code> muss jeden Fall einer Aufzählung abdecken.</li>
+            <li>Typen: Argumente, Rückgaben, Felder, Angaben von Varianten, Zuweisungen, Bedingungen und Rechenzeichen müssen zum erklärten Typ passen. Der Fehlertyp hinter <code>fails</code> ist der einzige Fehler, den eine Funktion zurückgeben darf.</li>
+            <li>Eingeschränkte Typen (<code>where</code>): Ein Wert passt an seinen Grundtyp, aber nie zurück. Er entsteht nur durch <code>check … as</code> oder als fester Wert, den der Prüfer gegen die Einschränkung nachrechnet.</li>
+            <li>Namen: Typen und Varianten beginnen groß, Funktionen, Variablen, Parameter und Felder klein.</li>
             <li>Tabellen: <code>xs[i]</code> liest, <code>xs[i] = …</code> und <code>xs[i].feld = …</code> schreiben. Ungeprüfte Werte und Geheimnisse sind als Stelle verboten.</li>
             <li><code>assembly function</code> hat keinen Rumpf, verlangt <code>uses Cpu</code> und eine Annahme und steht im Bericht als ungeprüft.</li>
             <li>Hardware: <code>Memory(a..b)</code> und <code>Port(n)</code> sind Rechte wie alle anderen. Wer eine Funktion aufruft, braucht mindestens deren Bereich.</li>
@@ -194,7 +197,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li>Feste Adressen prüft der Prüfer sofort. Berechnete Adressen und Stellen in Tabellen prüft er erst beim Ausführen, echtes Latch müsste sie beweisen.</li>
             <li>Assembler führt der Prototyp nicht aus. Ein Aufruf erscheint nur als Zeile in der Ausgabe.</li>
             <li>Bildschirmspeicher (ab <code>0xB8000</code>), serielle Schnittstelle (<code>0x3F8</code>) und Tastatur (<code>0x60</code>, <code>0x64</code>) sind nachgebaut, keine echte Hardware.</li>
-            <li>Typen werden noch nicht abgeglichen: Ob ein übergebener Wert zum Typ des Parameters passt, prüft der Prototyp nicht. Geprüft werden Rechte, Markierungen, Fehlerfälle und Ressourcen.</li>
+            <li>Der einzige Beweis für eingeschränkte Typen ist das Nachrechnen fester Werte. Alles andere braucht <code>check</code>, auch wenn es sich beweisen ließe (etwa <code>age + 1</code> bei bekanntem Bereich).</li>
+            <li>Die Größe einer Tabelle wird nur verglichen, wenn sie als feste Zahl dasteht. <code>Map&lt;K, V&gt;</code> ist als Typ bekannt, hat aber noch keine Funktionen.</li>
             <li>Ressourcen können noch nicht in Feldern, Listen oder Varianten stehen.</li>
           </ul>
           <p class="sub">Fehlt noch</p>
@@ -712,6 +716,37 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       '    let pin = secret 4711',
       '    Console.print(reveal pin',
       '        because "user must type it")',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: falscher Typ', world: '', code: [
+      'latch 1', '',
+      'type Age = Int',
+      '    where it in 0..150',
+      '',
+      'function greet(name: Text, age: Age)',
+      '    -> Text',
+      '{',
+      '    return "{name} ist {age}"',
+      '}',
+      '',
+      '// Rechnen ergibt Int, kein Age:',
+      'function next(age: Age) -> Age',
+      '{',
+      '    return age + 1',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    // Vertauscht:',
+      '    Console.print(greet(36, "Ada"))',
+      '',
+      '    // Feste Werte rechnet der',
+      '    // Prüfer nach, 200 passt nicht:',
+      '    Console.print(greet("Ada", 200))',
+      '',
+      '    // So geht es:',
+      '    Console.print(greet("Ada", 36))',
       '}'
     ].join('\n') },
     { title: 'Fehler: Speicher falsch benutzt', world: '', code: [

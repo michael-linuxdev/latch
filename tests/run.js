@@ -533,6 +533,238 @@ function main() { let old = 1 }`, '', r => r.errors.length === 1 && /Schlüsselw
 t('forever not yet', `latch 1
 function main() { forever { } }`, '', r => r.errors.length === 1 && /noch nicht unterstützt/.test(r.errors[0].msg));
 
+/* ---------- Typprüfung ---------- */
+const one = (r, re) => r.errors.length === 1 && re.test(r.errors[0].msg);
+const clean = r => r.errors.length === 0 && !r.runtimeError;
+const AGE = `latch 1
+type Age = Int where it in 0..150
+type Name = Text where it.length in 1..80
+type Email = Text where Text.contains(it, "@")
+`;
+t('type: argument', `latch 1
+function add(a: Int, b: Int) -> Int { return a + b }
+function main() uses Console { Console.print(add("1", 2)) }`, '', r => one(r, /add\(a\) erwartet Int, vorhanden ist Text/) && r.errors[0].line === 3);
+t('type: return', `latch 1
+function f() -> Int { return "x" }
+function main() { let x = f() }`, '', r => one(r, /Die Rückgabe von f erwartet Int, vorhanden ist Text/));
+t('type: missing return', `latch 1
+function f(n: Int) -> Int { if n > 0 { return 1 } }
+function main() { let x = f(1) }`, '', r => one(r, /f verspricht Int, der Rumpf kann aber ohne return enden/));
+t('type: bare return needs value', `latch 1
+function f() -> Int { return }
+function main() { let x = f() }`, '', r => one(r, /return braucht hier einen Wert vom Typ Int/));
+t('type: value from function without result', `latch 1
+function f() { return 5 }
+function main() { f() }`, '', r => one(r, /f gibt laut Kopf nichts zurück.*-> Int/));
+t('type: record fields', `latch 1
+type P = { n: Int, name: Text }
+function main() uses Console {
+    var p = P { n: "x", name: "a" }
+    p.name = 5
+    Console.print(p.zz)
+}`, '', r => r.errors.length === 3 && /Das Feld n von P erwartet Int, vorhanden ist Text/.test(r.errors[0].msg)
+  && /Das Feld name von p erwartet Text, vorhanden ist Int/.test(r.errors[1].msg) && /P hat kein Feld zz. Vorhanden: n, name/.test(r.errors[2].msg));
+t('type: variant fields', `latch 1
+enum Shape { Circle(r: Int), Dot }
+function main() {
+    let a = Circle("gross")
+    let b = Circle(2)
+}`, '', r => one(r, /Die Angabe r von Circle erwartet Int, vorhanden ist Text/));
+t('type: match binds carry field types', `latch 1
+enum Shape { Circle(r: Int), Label(text: Text) }
+function size(s: Shape) -> Int {
+    match s {
+        Circle(r) -> return r * 2
+        Label(text) -> return text * 2
+    }
+}
+function main() { let x = size(Circle(1)) }`, '', r => one(r, /Links von \* erwartet Int, vorhanden ist Text/) && r.errors[0].line === 6);
+t('type: match needs enum, arms of that enum', `latch 1
+enum A { X, Y }
+enum B { Z }
+function main() {
+    match 5 { X -> { } Y -> { } }
+    let a = X
+    match a { X -> { } Z -> { } }
+}`, '', r => has(r, /match erwartet einen Wert einer Aufzählung, vorhanden ist Int/) && has(r, /Z gehört zu B, verglichen wird aber ein Wert vom Typ A/) && has(r, /Es fehlt: Y/));
+t('type: wrong error enum returned', `latch 1
+enum E { Bad }
+enum F { Worse }
+function f() -> Int fails E { return Worse }
+function main() { let x = f() otherwise return Done }`, '', r => one(r, /Die Rückgabe von f erwartet Int, vorhanden ist F/));
+t('type: otherwise as binds the error type', AGE + `
+enum E { Bad }
+function f() -> Int fails E uses Input {
+    let a = check Input.read("a") as Age otherwise as e {
+        return e
+    }
+    return a
+}
+function main() uses Input { let x = f() otherwise return Done }`, '', r => one(r, /Die Rückgabe von f erwartet Int, vorhanden ist CheckFailed/));
+t('refined: only check or a constant makes one', AGE + `
+function show(a: Age) uses Console { Console.print("Alter {a}") }
+function main() uses Console, Input {
+    let n = 30 + Clock.now() * 0
+    show(n)
+}`, '', r => r.errors.some(e => /show\(a\) erwartet Age, vorhanden ist Int\. Ein Wert vom Typ Age entsteht nur durch Prüfen: check wert as Age/.test(e.msg)));
+t('refined: checked value and constant pass', AGE + `
+function show(a: Age) uses Console { Console.print("Alter {a}") }
+function main() uses Console, Input {
+    let a = check Input.read("age") as Age otherwise return Done
+    show(a)
+    show(36)
+    let b: Age = 100 + 50
+    show(b)
+}`, 'input age = 7', r => clean(r) && r.output.map(o => o.text).join() === 'Alter 7,Alter 36,Alter 150');
+t('refined: constant outside the range', AGE + `
+function show(a: Age) uses Console { Console.print("Alter {a}") }
+function main() uses Console { show(200) }`, '', r => one(r, /200 erfüllt die Einschränkung von Age nicht \(it in 0\.\.150\)/) && r.errors[0].line === 7 && !r.ran);
+t('refined: widens to its base, never back', AGE + `
+function twice(n: Int) -> Int { return n * 2 }
+function main() uses Console, Input {
+    var a = check Input.read("age") as Age otherwise return Done
+    Console.print(twice(a))
+    a = a + 1
+}`, 'input age = 7', r => one(r, /Die Variable a erwartet Age, vorhanden ist Int/));
+t('refined: two types over Text are not interchangeable', AGE + `
+function mail(to: Email) uses Console { Console.print(to) }
+function main() uses Console, Input {
+    let n = check Input.read("name") as Name otherwise return Done
+    mail(n)
+}`, '', r => one(r, /mail\(to\) erwartet Email, vorhanden ist Name\. Ein Wert vom Typ Email entsteht nur durch Prüfen/));
+t('refined: constant text is proven too', AGE + `
+type Signup = { name: Name, email: Email, age: Age }
+function main() uses Console {
+    let s = Signup { name: "Ada", email: "ada@x.org", age: 36 }
+    Console.print(s.name)
+    let bad = Signup { name: "Ada", email: "kein-at", age: 36 }
+}`, '', r => one(r, /"kein-at" erfüllt die Einschränkung von Email nicht/));
+t('refined: where may call a pure function', `latch 1
+function is_even(n: Int) -> Bool { return n % 2 == 0 }
+type Even = Int where is_even(it)
+function main() uses Console {
+    let a: Even = 4
+    Console.print(a)
+    let b: Even = 3
+}`, '', r => one(r, /3 erfüllt die Einschränkung von Even nicht/));
+t('refined: list of constants', AGE + `
+function oldest(xs: List<Age>) -> Int { return xs.length }
+function main() uses Console {
+    Console.print(oldest([1, 2, 3]))
+    let ys: List<Age> = [5, 999]
+}`, '', r => one(r, /999 erfüllt die Einschränkung von Age nicht/));
+t('refined: where and contracts are Bool', `latch 1
+type A = Int where it + 1
+function f(n: Int) -> Int requires n ensures result { return n }
+function main() { let x = f(1) }`, '', r => r.errors.length === 3 && /Die Einschränkung von A erwartet Bool, vorhanden ist Int/.test(r.errors[0].msg)
+  && /requires erwartet Bool/.test(r.errors[1].msg) && /ensures erwartet Bool/.test(r.errors[2].msg));
+t('type: check only takes simple values', AGE + `
+type P = { n: Int }
+function main() {
+    let p = P { n: 1 }
+    let a = check p as Age otherwise return Done
+}`, '', r => one(r, /check prüft nur einfache Werte \(Int, Text, Bool\), vorhanden ist P/));
+t('type: operators', `latch 1
+function main() uses Console {
+    let a = 1 + "x"
+    let b = "x" < 2
+    let c = 1 == "x"
+    let d = not 1
+    let e = -"x"
+    let f = 1 in 5
+    let g = "a" + "b"
+    Console.print(g)
+}`, '', r => r.errors.length === 6 && /Mit \+ lassen sich Int und Text nicht verbinden/.test(r.errors[0].msg) && /Links von < erwartet Int, vorhanden ist Text/.test(r.errors[1].msg)
+  && /Verglichen werden Int und Text/.test(r.errors[2].msg) && /not erwartet Bool/.test(r.errors[3].msg) && /Vorzeichen/.test(r.errors[4].msg) && /Rechts von in steht ein Bereich/.test(r.errors[5].msg));
+t('type: conditions are Bool', `latch 1
+function main() {
+    if 1 { }
+    while "ja" { }
+}`, '', r => r.errors.length === 2 && r.errors.every(e => /Die Bedingung erwartet Bool/.test(e.msg)));
+t('type: let annotation and assignment', `latch 1
+function main() {
+    let x: Text = 5
+    var n = 1
+    n = "zwei"
+    var names: List<Text> = ["a"]
+    names = ["b", "c"]
+}`, '', r => r.errors.length === 2 && /Die Variable x erwartet Text, vorhanden ist Int/.test(r.errors[0].msg) && /Die Variable n erwartet Int, vorhanden ist Text/.test(r.errors[1].msg));
+t('type: lists hold one type, for and index', `latch 1
+function main() uses Console {
+    let xs = [1, "a"]
+    for x in 5 { Console.print(x) }
+    let n = 7
+    Console.print(n[0])
+    var ys = [1, 2]
+    Console.print(ys["0"])
+    for y in ys { Console.print(y + 1) }
+    ys.length = 3
+}`, '', r => r.errors.length === 5 && /Eine Liste enthält nur Werte eines Typs, hier stehen Int und Text/.test(r.errors[0].msg) && /for läuft über einen Bereich/.test(r.errors[1].msg)
+  && /Eine Stelle \[\.\.\] gibt es nur an Tabellen und Listen, vorhanden ist Int/.test(r.errors[2].msg) && /Die Stelle einer Tabelle erwartet Int, vorhanden ist Text/.test(r.errors[3].msg)
+  && /hat kein Feld length/.test(r.errors[4].msg));
+t('type: table size and element', `latch 1
+type P = { n: Int }
+function sum(ps: Table<P, 3>) -> Int { return ps[0].n }
+function reset(change ps: Table<P, 3>) { ps[0] = 5 }
+function main() uses Console {
+    var two = [P { n: 1 }, P { n: 2 }]
+    Console.print(sum(two))
+    reset(change two)
+    var three = Table.fill(3, P { n: 0 })
+    reset(change three)
+    three[1].n = "x"
+}`, '', r => r.errors.length === 4 && /Die Stelle von ps erwartet P, vorhanden ist Int/.test(r.errors[0].msg) && /sum\(ps\) erwartet Table<P, 3>, vorhanden ist Table<P, 2>/.test(r.errors[1].msg)
+  && /reset\(change ps\) erwartet genau Table<P, 3>/.test(r.errors[2].msg) && /Das Feld n erwartet Int, vorhanden ist Text/.test(r.errors[3].msg));
+t('type: variant fields only through match', `latch 1
+enum Shape { Circle(r: Int), Dot }
+function main() uses Console {
+    let s = Circle(2)
+    Console.print(s.r)
+}`, '', r => one(r, /Die Angaben einer Variante von Shape erreicht man über match/));
+t('type: library arguments', `latch 1
+function main() uses Console {
+    Console.print(Text.contains(1, "a"))
+    for b in Text.bytes(5) { Console.print(b) }
+    let x = List.at(7, 0) otherwise return Done
+}`, '', r => r.errors.length === 3 && /Text\.contains \(Argument 1\) erwartet Text, vorhanden ist Int/.test(r.errors[0].msg) && /List\.at \(Argument 1\) erwartet List<\?>/.test(r.errors[2].msg));
+t('type: unknown and malformed types', `latch 1
+type P = { n: Zahl }
+function f(a: int, b: List<Int, Int>, c: P<Int>, d: Table<Int>) { }
+function main() { }`, '', r => r.errors.length === 5 && /Der Typ Zahl ist nicht bekannt/.test(r.errors[0].msg) && has(r, /Der Typ int ist nicht bekannt\. Typen beginnen groß: Int/)
+  && has(r, /List braucht genau einen Typ/) && has(r, /P hat keine Angaben in spitzen Klammern/) && has(r, /Table braucht Typ und Größe/));
+t('type: no marker inside angle brackets', `latch 1
+function f(a: List<unchecked Text>) { }
+function main() { }`, '', r => one(r, /unchecked und secret stehen ganz vorn am Typ/));
+t('names: types and variants upper case', `latch 1
+type age = Int where it in 0..150
+enum color { red, Green }
+function main() { }`, '', r => r.errors.length === 3 && /Typnamen beginnen mit einem Großbuchstaben: Age statt age/.test(r.errors[0].msg)
+  && /Typnamen beginnen mit einem Großbuchstaben: Color statt color/.test(r.errors[1].msg) && /Varianten beginnen mit einem Großbuchstaben: Red statt red/.test(r.errors[2].msg));
+t('names: functions, variables, fields lower case', `latch 1
+type P = { Name: Text }
+enum E { Bad(Why: Text) }
+function Helper(Count: Int) -> Int {
+    let Total = 1
+    for I in 1..2 { }
+    return 0
+}
+function main() { }`, '', r => r.errors.length === 6 && has(r, /Feldnamen beginnen mit einem Kleinbuchstaben: name statt Name/) && has(r, /Feldnamen beginnen mit einem Kleinbuchstaben: why statt Why/)
+  && has(r, /Funktionsnamen beginnen mit einem Kleinbuchstaben: helper statt Helper/) && has(r, /Parameter beginnen mit einem Kleinbuchstaben: count statt Count/)
+  && has(r, /Variablen beginnen mit einem Kleinbuchstaben: total statt Total/) && has(r, /Variablen beginnen mit einem Kleinbuchstaben: i statt I/));
+t('names: builtin type names are taken', `latch 1
+type List = { n: Int }
+enum Done { Fertig }
+function main() { }`, '', r => r.errors.length === 2 && /Der Typ List ist schon vergeben/.test(r.errors[0].msg) && /Der Name Done ist schon vergeben/.test(r.errors[1].msg));
+t('type: unchecked keeps its declared type', `latch 1
+function raw() -> unchecked Int uses Input { return Input.read("n") }
+function main() uses Input { let x = raw() }`, '', r => one(r, /Die Rückgabe von raw erwartet Int, vorhanden ist Text/));
+t('type: secret keeps its type', `latch 1
+function f(k: secret Text) -> Text { return Crypto.encrypt(k, "x") }
+function main() uses Console {
+    let pin = secret 4711
+    Console.print(f(pin))
+}`, '', r => one(r, /f\(k\) erwartet Text, vorhanden ist Int/));
+
 let failed = 0;
 for (const c of cases) {
   let r, ok = false, ex = null;

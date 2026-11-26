@@ -8,7 +8,8 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 
 ## Aufbau
 
-- `src/latch.js`: Lexer, Parser, statischer Prüfer, Interpreter, Bericht. Eine Datei, keine Abhängigkeiten.
+- `src/latch.js`: Lexer, Parser, statischer Prüfer (Rechte, Markierungen, Ressourcen, Typen), Interpreter,
+  Bericht. Eine Datei, keine Abhängigkeiten.
 - `src/ui.html`: Oberfläche des Prüfstands mit den Beispielen. `/*__LATCH__*/` wird beim Bauen ersetzt.
 - `build.py`: erzeugt `site/index.html`.
 - `tests/run.js`: Testprogramme mit erwartetem Ergebnis. `tests/examples.js`: lässt alle Beispiele laufen.
@@ -24,7 +25,9 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 
 ## Bekannte Lücken des Prototyps
 
-- Keine Typprüfung: Parametertypen werden nicht mit Argumenten abgeglichen.
+- Typprüfung: Der einzige Beweis für eingeschränkte Typen ist das Nachrechnen fester Werte. Tabellengrößen
+  werden nur verglichen, wenn sie als feste Zahl dastehen. `Map<K, V>` ist nur als Typ bekannt.
+  `secret` und `unchecked` an Feldern werden gelesen, aber nicht ausgewertet. Typisierte Texte fehlen.
 - Verträge, Tabellengrenzen und berechnete Hardware-Adressen werden zur Laufzeit geprüft, nicht bewiesen.
   Das widerspricht der Regel "Unbewiesenes läuft nicht" und ist nur im Prototyp so.
 - Ressourcen können nicht in Feldern, Listen, Tabellen oder Varianten stehen.
@@ -34,8 +37,9 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 
 ## Nächste Aufgaben, in dieser Reihenfolge
 
-1. Typprüfung im Prüfer: Parameter, Rückgaben, Felder, Varianten, Fehlertypen. Eingeschränkte Typen
-   (`where`) dürfen nur über `check` oder einen Beweis entstehen. Großschreibung der Namen erzwingen.
+1. Erledigt: Typprüfung im Prüfer (Parameter, Rückgaben, Felder, Varianten, Fehlertypen, eingeschränkte
+   Typen nur über `check` oder einen festen Wert, Großschreibung). Sieben Vorschläge dazu stehen in `SPEC.md`
+   unter "Typprüfung" und warten auf die Entscheidung des Autors.
 2. Entschiedene Sprachteile, die der Prüfstand nur reserviert hat (siehe `SPEC.md`): Module mit `public`
    und `import`, `together` mit `uses Tasks`, `foreign function`, `handles Interrupt(n)`, `const`, `test`,
    `with`, `forever`, `old`, `invariant`, `decreases`, die Bibliothek `Bits`, der feste Katalog der Rechte
