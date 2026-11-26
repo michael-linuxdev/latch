@@ -211,6 +211,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li><code>handles Interrupt(n)</code>: keine Parameter, eine Funktion je Nummer. Das Ergebnis ist ein Ereignis, bei allen dieselbe Aufzählung. <code>main</code> holt es mit <code>Interrupt.wait()</code> oder <code>Interrupt.next()</code> ab und braucht dafür <code>uses Interrupt</code>. Die Rechte von <code>main</code> sind auch für diese Funktionen die Obergrenze.</li>
             <li><code>together</code> verlangt <code>uses Tasks</code>. Die Zeilen sehen einander nicht und teilen nichts, was eine von ihnen verändert.</li>
             <li><code>foreign function</code> hat keinen Rumpf, verlangt eine Annahme und steht im Bericht als ungeprüft.</li>
+            <li>Der Bericht lässt sich als eigenes Dokument speichern: reiner Text, den man lesen, vergleichen und unterschreiben kann.</li>
             <li><code>const</code> ist ein fester, offener Wert. <code>test</code> ist rein und endet mit einem Wahrheitswert. <code>with</code> ändert nur die Kopie eines Datensatzes.</li>
             <li>Tabellen: <code>xs[i]</code> liest, <code>xs[i] = …</code> und <code>xs[i].feld = …</code> schreiben. Ungeprüfte Werte und Geheimnisse sind als Stelle verboten.</li>
             <li><code>assembly function</code> hat keinen Rumpf, verlangt <code>uses Cpu</code> und eine Annahme und steht im Bericht als ungeprüft.</li>
@@ -1251,6 +1252,19 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       if (r.mainResult !== null && !r.mainFailed) out.appendChild(el('p', 'hint', 'Ergebnis von main: ' + r.mainResult));
     }
 
+    var save = el('button', 'plain', 'Bericht als Datei speichern');
+    save.type = 'button';
+    save.addEventListener('click', function () {
+      var title = select.options[select.selectedIndex] ? select.options[select.selectedIndex].textContent : 'Latch-Programm';
+      var blob = new Blob([window.Latch.reportDocument(r, title)], { type: 'text/markdown;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'bericht.md';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    });
     if (!r.report) { rep.appendChild(el('p', 'hint', 'Der Bericht entsteht, sobald sich das Programm lesen lässt.')); return; }
     rep.appendChild(el('p', 'sub', 'Das Programm darf'));
     var chips = el('div', 'chips');
@@ -1292,6 +1306,9 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       rep.appendChild(d);
     });
     if (!r.errors.length) rep.appendChild(el('p', 'hint', 'Verträge werden in diesem Prototyp beim Ausführen geprüft, noch nicht bewiesen.'));
+    var bar = el('div', 'modadd');
+    bar.appendChild(save);
+    rep.appendChild(bar);
   }
 
   function run(scroll) {

@@ -21,6 +21,9 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 ## Regeln für die Arbeit
 
 - Vor jedem Commit: `node tests/run.js` und `node tests/examples.js` müssen durchlaufen.
+- Nach jeder Änderung am Kern oder am Bericht: `kernel/REPORT.md` neu erzeugen (Befehl in `README.md`).
+  Ein Test vergleicht die Datei mit dem aktuellen Stand. So zeigt jeder Unterschied im Bericht, was sich an
+  Rechten, Verträgen und Annahmen geändert hat.
 - Jede Sprachänderung bekommt einen Test, einen Eintrag in `SPEC.md` und, wenn sinnvoll, ein Beispiel.
 - Fehlermeldungen sind deutsch, nennen die Zeile und sagen, wie man den Fehler behebt.
 - Beispiele auf der Seite haben höchstens rund 40 Zeichen pro Zeile (Handy).
@@ -60,5 +63,6 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
    Vorher mit dem Autor klären, ob C als Zwischenschritt in Ordnung ist oder direkt Maschinencode gewünscht ist.
 5. Vertragsbeweis über einen SMT-Löser (zum Beispiel Z3) mit `old`, `invariant` und `decreases`.
    Erst damit gilt "Unbewiesenes läuft nicht". Tabellengrenzen und Hardware-Adressen gehören dazu.
-6. Bericht als eigenes Dokument ausgeben.
+6. Erledigt: `Latch.reportDocument(ergebnis, titel)` gibt den Bericht als Text aus, `tools/report.js` schreibt ihn
+   für eine Datei samt Modulen, die Seite speichert ihn als Datei.
 7. `hardened` erst nach dem ersten Compiler.
