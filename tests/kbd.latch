@@ -1,0 +1,87 @@
+latch 1
+
+type Byte = Int where it in 0..255
+type Cursor = { row: Int, col: Int }
+
+enum KbdError { BadDevice }
+
+function put(change cur: Cursor,
+             ch: Int)
+    uses Memory(0xB8000..0xB8F9F)
+    requires ch in 0..255
+    requires cur.row in 0..24
+    requires cur.col in 0..79
+{
+    let cell = cur.row * 80 + cur.col
+    Memory.write(0xB8000 + cell * 2, ch)
+    cur.col = cur.col + 1
+    if cur.col == 80 {
+        cur.col = 0
+        cur.row = cur.row + 1
+    }
+    if cur.row == 25 { cur.row = 0 }
+}
+
+function key_ready()
+    -> Bool fails KbdError
+    uses Port(0x64)
+    assumes "PS/2 status port at 0x64"
+{
+    let st = check Port.read(0x64) as Byte
+        otherwise return BadDevice
+    return st % 2 == 1
+}
+
+function read_scan()
+    -> Byte fails KbdError
+    uses Port(0x60)
+    assumes "PS/2 data port at 0x60"
+{
+    let code = check Port.read(0x60)
+        as Byte
+        otherwise return BadDevice
+    return code
+}
+
+function pick(keys: Text, i: Int)
+    -> Int
+{
+    return List.at(Text.bytes(keys), i)
+        otherwise return 0
+}
+
+// Tastencode -> Zeichen, 0 = unbekannt
+function decode(code: Byte) -> Int
+    ensures result in 0..127
+{
+    if code == 0x39 { return 32 }
+    if code in 0x10..0x19 {
+        return pick("qwertyuiop",
+                    code - 0x10)
+    }
+    if code in 0x1E..0x26 {
+        return pick("asdfghjkl",
+                    code - 0x1E)
+    }
+    if code in 0x2C..0x32 {
+        return pick("zxcvbnm",
+                    code - 0x2C)
+    }
+    return 0
+}
+
+function main()
+    -> Done fails KbdError
+    uses Memory(0xB8000..0xB8F9F),
+         Port(0x60), Port(0x64)
+{
+    var cur = Cursor { row: 0, col: 0 }
+    var more = try key_ready()
+    while more {
+        let code = try read_scan()
+        let ch = decode(code)
+        if ch > 0 { put(change cur, ch) }
+        more = try key_ready()
+    }
+    return Done
+}

@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Latch Prüfstand</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Layout: one column on a phone (editor, then results); two columns from 960px. */
+  --bg: #f1f3f0;
+  --surface: #ffffff;
+  --ink: #1c2422;
+  --muted: #5b6763;
+  --line: #d3d9d5;
+  --accent: #86560f;
+  --accent-ink: #ffffff;
+  --ok: #1c7448;
+  --warn: #8f6100;
+  --bad: #b3261a;
+  --code-bg: #f7f8f6;
+  --screen-bg: #0a0e0c;
+  --screen-ink: #cdd6d1;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131816; --surface: #1c2320; --ink: #e5eae7; --muted: #98a49f; --line: #303a36;
+    --accent: #dba844; --accent-ink: #1c1505; --ok: #5cc78e; --warn: #e2b455; --bad: #ff8172;
+    --code-bg: #171d1b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131816; --surface: #1c2320; --ink: #e5eae7; --muted: #98a49f; --line: #303a36;
+  --accent: #dba844; --accent-ink: #1c1505; --ok: #5cc78e; --warn: #e2b455; --bad: #ff8172;
+  --code-bg: #171d1b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.5;
+  -webkit-touch-callout: none;
+}
+.page { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; flex-direction: column; gap: 4px; }
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+h1 { font-family: var(--font-mono); font-weight: 600; font-size: 1.5rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.tag { font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 6px; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+.grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 960px) { .grid { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); } }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.panel > h2, .panel > summary { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0; padding: 12px 14px; }
+.panel > summary { cursor: pointer; list-style-position: inside; }
+.panel > summary:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.panel-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.toolbar { display: flex; gap: 10px; padding: 12px 14px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid var(--line); }
+.toolbar label { font-size: 0.875rem; color: var(--muted); }
+select {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; flex: 1 1 180px; min-width: 0;
+}
+.editor { display: flex; background: var(--code-bg); font-family: var(--font-mono); font-size: 14px; line-height: 21px; }
+.gutter { margin: 0; padding: 10px 8px 10px 10px; text-align: right; color: var(--muted); user-select: none; -webkit-user-select: none; border-right: 1px solid var(--line); flex: none; font: inherit; }
+.gutter span { display: block; }
+.gutter .err { color: var(--bad); font-weight: 600; }
+.gutter .warnline { color: var(--warn); font-weight: 600; }
+textarea {
+  font: inherit; color: var(--ink); background: transparent; border: 0; margin: 0; resize: none;
+  padding: 10px 12px; flex: 1 1 auto; min-width: 0; white-space: pre; overflow-x: auto; overflow-y: hidden; tab-size: 4;
+}
+#world { font-family: var(--font-mono); font-size: 14px; line-height: 21px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; width: 100%; }
+.runbar { position: sticky; bottom: 0; padding: 10px 14px; background: var(--surface); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+button.run {
+  font: inherit; font-weight: 600; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 8px;
+  padding: 10px 16px; cursor: pointer;
+}
+button.run:active { transform: translateY(1px); }
+.status { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.9375rem; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.status.ok .dot { background: var(--ok); } .status.ok { color: var(--ok); }
+.status.warn .dot { background: var(--warn); } .status.warn { color: var(--warn); }
+.status.bad .dot { background: var(--bad); } .status.bad { color: var(--bad); }
+.hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
+ul.msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.msgs li { border-left: 3px solid var(--bad); padding: 6px 10px; background: var(--code-bg); border-radius: 0 6px 6px 0; }
+ul.msgs li.warn { border-left-color: var(--warn); }
+ul.msgs li.good { border-left-color: var(--ok); }
+ul.msgs button { font: inherit; font-family: var(--font-mono); font-size: 0.8125rem; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.out { display: flex; flex-direction: column; gap: 6px; font-family: var(--font-mono); font-size: 14px; }
+.out div { display: flex; gap: 8px; align-items: baseline; }
+.kind { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; flex: none; min-width: 4.5em; text-align: center; }
+.out .text { overflow-wrap: anywhere; min-width: 0; }
+.screen {
+  margin: 0; background: var(--screen-bg); color: var(--screen-ink); font-family: var(--font-mono);
+  font-size: clamp(6px, 1.72vw, 10.5px); line-height: 1.3; padding: 10px; border-radius: 6px;
+  white-space: pre; overflow-x: auto; min-height: 9em;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--font-mono); font-size: 0.8125rem; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: var(--code-bg); overflow-wrap: anywhere; }
+.chip.pure { color: var(--ok); border-color: var(--ok); }
+.chip.asm { color: var(--warn); border-color: var(--warn); }
+.fn { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.fn-name { font-family: var(--font-mono); font-weight: 600; }
+dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; font-size: 0.9375rem; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: var(--font-mono); font-size: 0.875rem; overflow-wrap: anywhere; }
+.sub { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 4px 0 0; }
+.notes ul { margin: 0; padding-left: 1.1em; }
+.notes li { margin: 2px 0; }
+code { font-family: var(--font-mono); font-size: 0.9em; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.7</span></div>
+    <p class="lede">Latch-Code schreiben, prüfen und ausführen. Der Prüfer zeigt, was das Programm darf, und lehnt ab, was ungeprüfte Daten oder Geheimnisse falsch verwendet.</p>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-label="Programm">
+        <div class="toolbar">
+          <label for="example">Beispiel</label>
+          <select id="example"></select>
+        </div>
+        <div class="editor">
+          <pre class="gutter" id="gutter" aria-hidden="true"></pre>
+          <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Latch-Code"></textarea>
+        </div>
+        <div class="runbar">
+          <button class="run" id="run" type="button">Prüfen und ausführen</button>
+          <span class="status" id="status-small" role="status"><span class="dot"></span><span></span></span>
+        </div>
+      </section>
+
+      <details class="panel" id="world-panel">
+        <summary>Außenwelt (simuliert)</summary>
+        <div class="panel-body">
+          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>db tabelle = down</code>, <code>mail = down</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>.</p>
+          <textarea id="world" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Simulierte Außenwelt"></textarea>
+        </div>
+      </details>
+    </div>
+
+    <div class="col" id="results">
+      <section class="panel">
+        <h2>Prüfung</h2>
+        <div class="panel-body" id="check"></div>
+      </section>
+      <section class="panel" id="screen-panel" hidden>
+        <h2>Bildschirm (80 × 25, simuliert)</h2>
+        <div class="panel-body"><pre class="screen" id="screen" aria-label="Simulierter Textbildschirm"></pre></div>
+      </section>
+      <section class="panel">
+        <h2>Ausgabe</h2>
+        <div class="panel-body" id="output"></div>
+      </section>
+      <section class="panel">
+        <h2>Bericht</h2>
+        <div class="panel-body" id="report"></div>
+      </section>
+      <details class="panel notes">
+        <summary>Was der Prototyp kann</summary>
+        <div class="panel-body">
+          <p class="sub">Wird geprüft, bevor etwas läuft</p>
+          <ul>
+            <li>Rechte: Jede Funktion braucht in <code>uses</code> alles, was sie selbst und die von ihr aufgerufenen Funktionen nach außen tun.</li>
+            <li><code>unchecked</code>: Werte von außen gelangen ohne <code>check … as</code> weder in Berechnungen noch in Bedingungen, Datensätze oder die Bibliothek.</li>
+            <li><code>secret</code>: keine Ausgabe, kein Vergleich, kein Einsetzen in Text. Ausweg nur über <code>Crypto</code> oder <code>reveal … because</code>.</li>
+            <li>Jeder Fehlerfall braucht <code>otherwise return …</code>, <code>otherwise as e { … }</code> oder <code>try</code>. Der Fehlertyp steht mit <code>fails</code> im Kopf.</li>
+            <li><code>resource</code>: Jeder Wert wird genau einmal verbraucht, durch <code>take</code>, <code>return</code> oder <code>destroy</code>. Nutzung nach der Abgabe, doppelte Freigabe und Lecks werden abgelehnt.</li>
+            <li><code>take</code> und <code>change</code> stehen am Parameter und beim Aufruf. <code>change</code> verlangt eine mit <code>var</code> angelegte Variable.</li>
+            <li><code>region</code>: Was mit <code>name.new(…)</code> entsteht, darf den Block nicht verlassen.</li>
+            <li><code>match</code> muss jeden Fall einer Aufzählung abdecken.</li>
+            <li>Tabellen: <code>xs[i]</code> liest, <code>xs[i] = …</code> und <code>xs[i].feld = …</code> schreiben. Ungeprüfte Werte und Geheimnisse sind als Stelle verboten.</li>
+            <li><code>assembly function</code> hat keinen Rumpf, verlangt <code>uses Cpu</code> und eine Annahme und steht im Bericht als ungeprüft.</li>
+            <li>Hardware: <code>Memory(a..b)</code> und <code>Port(n)</code> sind Rechte wie alle anderen. Wer eine Funktion aufruft, braucht mindestens deren Bereich.</li>
+          </ul>
+          <p class="sub">Noch vereinfacht</p>
+          <ul>
+            <li>Verträge (<code>requires</code>, <code>ensures</code>) werden beim Ausführen geprüft, nicht bewiesen.</li>
+            <li>Netz, Datenbank, Mail und Kryptografie sind simuliert. Nichts verlässt diese Seite.</li>
+            <li>Regionen werden nur geprüft. Speicher gibt der Prototyp nicht wirklich frei.</li>
+            <li>Feste Adressen prüft der Prüfer sofort. Berechnete Adressen und Stellen in Tabellen prüft er erst beim Ausführen, echtes Latch müsste sie beweisen.</li>
+            <li>Assembler führt der Prototyp nicht aus. Ein Aufruf erscheint nur als Zeile in der Ausgabe.</li>
+            <li>Bildschirmspeicher (ab <code>0xB8000</code>), serielle Schnittstelle (<code>0x3F8</code>) und Tastatur (<code>0x60</code>, <code>0x64</code>) sind nachgebaut, keine echte Hardware.</li>
+            <li>Typen werden noch nicht abgeglichen: Ob ein übergebener Wert zum Typ des Parameters passt, prüft der Prototyp nicht. Geprüft werden Rechte, Markierungen, Fehlerfälle und Ressourcen.</li>
+            <li>Ressourcen können noch nicht in Feldern, Listen oder Varianten stehen.</li>
+          </ul>
+          <p class="sub">Fehlt noch</p>
+          <ul>
+            <li>Beweise für Verträge. Dazu gehören die schon entschiedenen Wörter <code>old</code>, <code>invariant</code>, <code>decreases</code> und <code>forever</code>.</li>
+            <li>Module mit <code>public</code> und <code>import</code>, <code>together</code>, <code>foreign function</code>, <code>handles Interrupt(n)</code>, <code>const</code>, <code>test</code>, <code>hardened</code>, die Bibliothek <code>Bits</code>.</li>
+            <li>Der feste Katalog der Rechte. <code>Db</code>, <code>Input</code> und <code>Console</code> sind Platzhalter des Prüfstands.</li>
+          </ul>
+          <p class="sub">Bibliothek</p>
+          <ul>
+            <li><code>Console.print(x)</code>, <code>Input.read("feld")</code>, <code>Net.get("host", pfad)</code></li>
+            <li><code>Db.insert("tabelle", satz)</code>, <code>Db.exists("tabelle", "feld", wert)</code>, <code>Db.count("tabelle")</code></li>
+            <li><code>Mail.send("host", an, betreff, text)</code>, <code>Clock.now()</code>, <code>Random.int(a, b)</code></li>
+            <li><code>Kem.generate()</code>, <code>Crypto.encrypt(key, text)</code>, <code>Crypto.public_key(key)</code>, <code>Text.contains(text, teil)</code>, <code>Text.bytes(text)</code>, <code>List.at(liste, stelle)</code>, <code>Table.fill(anzahl, wert)</code></li>
+            <li><code>Memory.write(adresse, byte)</code>, <code>Memory.read(adresse)</code>, <code>Port.write(port, byte)</code>, <code>Port.read(port)</code></li>
+          </ul>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+/*__LATCH__*/
+</script>
+<script>
+(function () {
+  'use strict';
+  var TYPES = [
+    'type Name  = Text',
+    '    where it.length in 1..80',
+    'type Email = Text',
+    '    where Text.contains(it, "@")',
+    'type Age   = Int',
+    '    where it in 0..150',
+    '',
+    'type Signup = {',
+    '    name:  Name,',
+    '    email: Email,',
+    '    age:   Age,',
+    '}',
+    '',
+    'enum SignupError {',
+    '    BadInput(field: Text),',
+    '    Taken,',
+    '    Unavailable,',
+    '}'
+  ].join('\n');
+  var SIGNUP_WORLD = 'input name = Ada\ninput email = ada@example.org\ninput age = 36';
+
+    var MEM = [
+    'resource Page { frame: Int }',
+    '',
+    'type Pool = {',
+    '    next: Int,',
+    '    free: Int,',
+    '}',
+    '',
+    'enum MemError { OutOfMemory }',
+    '',
+    'function alloc(change pool: Pool)',
+    '    -> Page fails MemError',
+    '    ensures pool.free >= 0',
+    '{',
+    '    if pool.free == 0 {',
+    '        return OutOfMemory',
+    '    }',
+    '    let frame = pool.next',
+    '    pool.next = pool.next + 1',
+    '    pool.free = pool.free - 1',
+    '    return Page { frame }',
+    '}',
+    '',
+    'function free(change pool: Pool,',
+    '              take page: Page)',
+    '    ensures pool.free >= 1',
+    '{',
+    '    pool.free = pool.free + 1',
+    '    destroy page',
+    '}'
+  ].join('\n');
+
+  var EXAMPLES = [
+    { title: 'Anmeldung (läuft durch)', world: SIGNUP_WORLD, code: [
+      'latch 1', '', TYPES, '',
+      'function parse()',
+      '    -> Signup fails SignupError',
+      '    uses Input',
+      '{',
+      '    let name = check Input.read("name")',
+      '        as Name',
+      '        otherwise return BadInput("name")',
+      '    let email = check Input.read("email")',
+      '        as Email',
+      '        otherwise return BadInput("email")',
+      '    let age = check Input.read("age")',
+      '        as Age',
+      '        otherwise return BadInput("age")',
+      '    return Signup { name, email, age }',
+      '}',
+      '',
+      'function store(s: Signup)',
+      '    -> Int fails SignupError',
+      '    uses Db("accounts")',
+      '    ensures result >= 1',
+      '{',
+      '    if Db.exists("accounts",',
+      '                 "email", s.email) {',
+      '        return Taken',
+      '    }',
+      '    return Db.insert("accounts", s)',
+      '        otherwise return Unavailable',
+      '}',
+      '',
+      'function main()',
+      '    -> Int fails SignupError',
+      '    uses Input, Db("accounts"),',
+      '         Net("smtp.x.com"), Console',
+      '{',
+      '    let s = parse() otherwise as e {',
+      '        match e {',
+      '            BadInput(field) -> {',
+      '                Console.print(',
+      '                    "Feld: {field}")',
+      '            }',
+      '            Taken -> {',
+      '                Console.print("vergeben")',
+      '            }',
+      '            Unavailable -> {',
+      '                Console.print("gestört")',
+      '            }',
+      '        }',
+      '        return e',
+      '    }',
+      '    let id = try store(s)',
+      '    Mail.send("smtp.x.com", s.email,',
+      '              "Welcome",',
+      '              "Hello {s.name}")',
+      '        otherwise return Unavailable',
+      '    Console.print("Konto {id} angelegt")',
+      '    return id',
+      '}'
+    ].join('\n') },
+    { title: 'Wetter aus dem Netz', world: 'net api.weather.com/v1/dresden = 3', code: [
+      'latch 1', '',
+      'type Celsius = Int',
+      '    where it in -90..60',
+      '',
+      'enum WeatherError { NoData }',
+      '',
+      'function weather(city: Text)',
+      '    -> unchecked Text',
+      '    uses Net("api.weather.com")',
+      '{',
+      '    return Net.get("api.weather.com",',
+      '                   "/v1/" + city)',
+      '}',
+      '',
+      'function advice(temp: Celsius) -> Text',
+      '{',
+      '    if temp < 5 {',
+      '        return "Kalt, {temp} Grad"',
+      '    }',
+      '    return "Mild, {temp} Grad"',
+      '}',
+      '',
+      'function main()',
+      '    -> Done fails WeatherError',
+      '    uses Net("api.weather.com"),',
+      '         Console',
+      '{',
+      '    let raw = weather("dresden")',
+      '    let temp = check raw as Celsius',
+      '        otherwise return NoData',
+      '    Console.print(advice(temp))',
+      '    return Done',
+      '}'
+    ].join('\n') },
+    { title: 'Speicher: Seitenverwalter', world: '', code: [
+      'latch 1', '', MEM, '',
+      'function main()',
+      '    -> Done fails MemError',
+      '    uses Console',
+      '{',
+      '    var pool = Pool { next: 0, free: 2 }',
+      '    let a = try alloc(change pool)',
+      '    Console.print("Seite {a.frame}")',
+      '    free(change pool, take a)',
+      '    Console.print("frei: {pool.free}")',
+      '    return Done',
+      '}'
+    ].join('\n') },
+    { title: 'Kern: Bildschirmausgabe', world: '', code: [
+      'latch 1', '',
+      'type Cursor = { row: Int, col: Int }',
+      '',
+      'function put(change cur: Cursor,',
+      '             ch: Int)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '    requires ch in 0..255',
+      '    requires cur.row in 0..24',
+      '    requires cur.col in 0..79',
+      '    assumes "VGA text buffer at 0xB8000"',
+      '{',
+      '    let cell = cur.row * 80 + cur.col',
+      '    let at = 0xB8000 + cell * 2',
+      '    Memory.write(at, ch)',
+      '    Memory.write(at + 1, 0x0F)',
+      '    cur.col = cur.col + 1',
+      '    if cur.col == 80 {',
+      '        cur.col = 0',
+      '        cur.row = cur.row + 1',
+      '    }',
+      '    if cur.row == 25 { cur.row = 0 }',
+      '}',
+      '',
+      'function print(change cur: Cursor,',
+      '               msg: Text)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '{',
+      '    for b in Text.bytes(msg) {',
+      '        put(change cur, b)',
+      '    }',
+      '}',
+      '',
+      'function newline(change cur: Cursor)',
+      '{',
+      '    cur.col = 0',
+      '    cur.row = cur.row + 1',
+      '    if cur.row == 25 { cur.row = 0 }',
+      '}',
+      '',
+      'function log(msg: Text)',
+      '    uses Port(0x3F8)',
+      '    assumes "COM1 serial port at 0x3F8"',
+      '{',
+      '    for b in Text.bytes(msg) {',
+      '        Port.write(0x3F8, b)',
+      '    }',
+      '}',
+      '',
+      'function main()',
+      '    uses Memory(0xB8000..0xB8F9F),',
+      '         Port(0x3F8)',
+      '{',
+      '    var cur = Cursor { row: 0, col: 0 }',
+      '    print(change cur, "Latch OS 0.0.1")',
+      '    newline(change cur)',
+      '    print(change cur, "Kern laeuft.")',
+      '    log("boot ok")',
+      '}'
+    ].join('\n') },
+    { title: 'Kern: Tastatur', world: 'keys = hallo latch', code: [
+      'latch 1',
+      '',
+      'type Byte = Int where it in 0..255',
+      'type Cursor = { row: Int, col: Int }',
+      '',
+      'enum KbdError { BadDevice }',
+      '',
+      'function put(change cur: Cursor,',
+      '             ch: Int)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '    requires ch in 0..255',
+      '    requires cur.row in 0..24',
+      '    requires cur.col in 0..79',
+      '{',
+      '    let cell = cur.row * 80 + cur.col',
+      '    Memory.write(0xB8000 + cell * 2, ch)',
+      '    cur.col = cur.col + 1',
+      '    if cur.col == 80 {',
+      '        cur.col = 0',
+      '        cur.row = cur.row + 1',
+      '    }',
+      '    if cur.row == 25 { cur.row = 0 }',
+      '}',
+      '',
+      'function key_ready()',
+      '    -> Bool fails KbdError',
+      '    uses Port(0x64)',
+      '    assumes "PS/2 status port at 0x64"',
+      '{',
+      '    let st = check Port.read(0x64) as Byte',
+      '        otherwise return BadDevice',
+      '    return st % 2 == 1',
+      '}',
+      '',
+      'function read_scan()',
+      '    -> Byte fails KbdError',
+      '    uses Port(0x60)',
+      '    assumes "PS/2 data port at 0x60"',
+      '{',
+      '    let code = check Port.read(0x60)',
+      '        as Byte',
+      '        otherwise return BadDevice',
+      '    return code',
+      '}',
+      '',
+      'function pick(keys: Text, i: Int)',
+      '    -> Int',
+      '{',
+      '    return List.at(Text.bytes(keys), i)',
+      '        otherwise return 0',
+      '}',
+      '',
+      '// Tastencode -> Zeichen, 0 = unbekannt',
+      'function decode(code: Byte) -> Int',
+      '    ensures result in 0..127',
+      '{',
+      '    if code == 0x39 { return 32 }',
+      '    if code in 0x10..0x19 {',
+      '        return pick("qwertyuiop",',
+      '                    code - 0x10)',
+      '    }',
+      '    if code in 0x1E..0x26 {',
+      '        return pick("asdfghjkl",',
+      '                    code - 0x1E)',
+      '    }',
+      '    if code in 0x2C..0x32 {',
+      '        return pick("zxcvbnm",',
+      '                    code - 0x2C)',
+      '    }',
+      '    return 0',
+      '}',
+      '',
+      'function main()',
+      '    -> Done fails KbdError',
+      '    uses Memory(0xB8000..0xB8F9F),',
+      '         Port(0x60), Port(0x64)',
+      '{',
+      '    var cur = Cursor { row: 0, col: 0 }',
+      '    var more = try key_ready()',
+      '    while more {',
+      '        let code = try read_scan()',
+      '        let ch = decode(code)',
+      '        if ch > 0 { put(change cur, ch) }',
+      '        more = try key_ready()',
+      '    }',
+      '    return Done',
+      '}'
+    ].join('\n') },
+    { title: 'Kern: Planer', world: '', code: [
+      'latch 1',
+      '',
+      'enum State { Ready, Finished }',
+      '',
+      'type Task = {',
+      '    name: Text,',
+      '    left: Int,',
+      '    state: State,',
+      '}',
+      '',
+      '// Der Wechsel selbst ist Assembler:',
+      'assembly function switch_to(id: Int)',
+      '    uses Cpu',
+      '    assumes "saves and loads all registers"',
+      '',
+      'function log(msg: Text)',
+      '    uses Port(0x3F8)',
+      '{',
+      '    for b in Text.bytes(msg) {',
+      '        Port.write(0x3F8, b)',
+      '    }',
+      '    Port.write(0x3F8, 10)',
+      '}',
+      '',
+      'function task(name: Text, left: Int)',
+      '    -> Task',
+      '{',
+      '    return Task { name, left,',
+      '                  state: Ready }',
+      '}',
+      '',
+      '// Reihum die naechste bereite Aufgabe,',
+      '// -1 wenn keine mehr wartet',
+      'function pick(tasks: Table<Task, 3>,',
+      '              last: Int)',
+      '    -> Int',
+      '    requires last in 0..2',
+      '    ensures result in -1..2',
+      '{',
+      '    for k in 1..3 {',
+      '        let i = (last + k) % 3',
+      '        let t = tasks[i]',
+      '        if t.state == Ready { return i }',
+      '    }',
+      '    return -1',
+      '}',
+      '',
+      '// Eine Zeitscheibe fuer Aufgabe i',
+      'function step(change tasks: Table<Task, 3>,',
+      '              i: Int)',
+      '    uses Port(0x3F8), Cpu',
+      '    requires i in 0..2',
+      '{',
+      '    switch_to(i)',
+      '    let t = tasks[i]',
+      '    log("{t.name} arbeitet")',
+      '    tasks[i].left = t.left - 1',
+      '    if t.left == 1 {',
+      '        tasks[i].state = Finished',
+      '    }',
+      '}',
+      '',
+      'function main()',
+      '    uses Port(0x3F8), Cpu',
+      '{',
+      '    var tasks = [',
+      '        task("editor", 2),',
+      '        task("backup", 3),',
+      '        task("uhr", 1),',
+      '    ]',
+      '    var next = pick(tasks, 2)',
+      '    while next >= 0 {',
+      '        step(change tasks, next)',
+      '        next = pick(tasks, next)',
+      '    }',
+      '    log("alle Aufgaben fertig")',
+      '}'
+    ].join('\n') },
+    { title: 'Region und match', world: '', code: [
+      'latch 1', '',
+      'type Buffer = { size: Int, used: Int }',
+      '',
+      'enum Level { Low, Mid(pct: Int), Full }',
+      '',
+      'function fill(change b: Buffer,',
+      '              n: Int)',
+      '    requires n <= b.size',
+      '{',
+      '    b.used = n',
+      '}',
+      '',
+      'function level(used: Int, size: Int)',
+      '    -> Level',
+      '{',
+      '    if used == size { return Full }',
+      '    if used * 4 < size { return Low }',
+      '    return Mid(used * 100 / size)',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    var state = Low',
+      '    region scratch {',
+      '        var buf = scratch.new(',
+      '            Buffer { size: 4096, used: 0 })',
+      '        fill(change buf, 3000)',
+      '        state = level(buf.used, buf.size)',
+      '    }',
+      '    match state {',
+      '        Low -> Console.print("fast leer")',
+      '        Mid(pct) -> Console.print("{pct} %")',
+      '        Full -> Console.print("voll")',
+      '    }',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: Recht fehlt', world: '', code: [
+      'latch 1', '',
+      '// add soll nur rechnen.',
+      '// Der Prüfer merkt, dass es',
+      '// heimlich etwas ausgibt.',
+      '',
+      'function add(a: Int, b: Int) -> Int',
+      '{',
+      '    Console.print("{a} + {b}")',
+      '    return a + b',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    Console.print(add(2, 3))',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: ungeprüfte Daten', world: 'input age = 36', code: [
+      'latch 1', '',
+      'type Age = Int',
+      '    where it in 0..150',
+      '',
+      'function main()',
+      '    uses Input, Console',
+      '{',
+      '    let raw = Input.read("age")',
+      '',
+      '    // Beides lehnt der Prüfer ab:',
+      '    if raw == "36" {',
+      '        Console.print("genau 36")',
+      '    }',
+      '    Console.print(raw)',
+      '',
+      '    // So geht es richtig:',
+      '    let age = check raw as Age',
+      '        otherwise return Done',
+      '    Console.print("Alter {age}")',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: Geheimnis verraten', world: '', code: [
+      'latch 1', '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    let key = Kem.generate()',
+      '',
+      '    // Beides lehnt der Prüfer ab:',
+      '    Console.print(key)',
+      '    Console.print("Key: {key}")',
+      '',
+      '    // Erlaubt, weil verschlüsselt:',
+      '    let box = Crypto.encrypt(key, "hi")',
+      '    Console.print(box)',
+      '',
+      '    // Erlaubt, mit Begründung:',
+      '    let pin = secret 4711',
+      '    Console.print(reveal pin',
+      '        because "user must type it")',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: Speicher falsch benutzt', world: '', code: [
+      'latch 1', '', MEM, '',
+      'function main()',
+      '    -> Done fails MemError',
+      '    uses Console',
+      '{',
+      '    var pool = Pool { next: 0, free: 2 }',
+      '    let a = try alloc(change pool)',
+      '    free(change pool, take a)',
+      '',
+      '    // a ist abgegeben, beides falsch:',
+      '    Console.print("Seite {a.frame}")',
+      '    free(change pool, take a)',
+      '',
+      '    // b wird nie zurückgegeben:',
+      '    let b = try alloc(change pool)',
+      '    return Done',
+      '}'
+    ].join('\n') },
+    { title: 'Fehler: Kern greift daneben', world: '', code: [
+      'latch 1', '',
+      '// Darf nur den Bildschirm anfassen:',
+      'function poke()',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '{',
+      '    // Ein Byte dahinter:',
+      '    Memory.write(0xB8FA0, 65)',
+      '}',
+      '',
+      '// Hat gar kein Hardwarerecht:',
+      'function beep()',
+      '{',
+      '    Port.write(0x61, 3)',
+      '}',
+      '',
+      '// Zu enger Bereich fuer poke:',
+      'function main()',
+      '    uses Memory(0xB8000..0xB80FF)',
+      '{',
+      '    poke()',
+      '    beep()',
+      '}'
+    ].join('\n') },
+    { title: 'Vertrag wird verletzt', world: '', code: [
+      'latch 1', '',
+      'function withdraw(balance: Int,',
+      '                  amount: Int)',
+      '    -> Int',
+      '    requires amount <= balance',
+      '    ensures result >= 0',
+      '{',
+      '    return balance - amount',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    Console.print(withdraw(100, 30))',
+      '    Console.print(withdraw(100, 300))',
+      '}'
+    ].join('\n') }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var code = $('code'), world = $('world'), gutter = $('gutter'), select = $('example');
+  var marks = { err: {}, warn: {} };
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+
+  function layout() {
+    var lines = code.value.split('\n').length;
+    code.rows = lines;
+    clear(gutter);
+    for (var i = 1; i <= lines; i++) {
+      var s = el('span', marks.err[i] ? 'err' : marks.warn[i] ? 'warnline' : '', String(i));
+      gutter.appendChild(s);
+    }
+  }
+  function gotoLine(line) {
+    var lines = code.value.split('\n'), pos = 0;
+    for (var i = 0; i < line - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+    var end = pos + (lines[line - 1] || '').length;
+    code.focus();
+    try { code.setSelectionRange(pos, end); } catch (e) {}
+    var span = gutter.children[line - 1];
+    if (span && span.scrollIntoView) span.scrollIntoView({ block: 'center' });
+  }
+  function msgItem(m, cls) {
+    var li = el('li', cls);
+    if (m.line) {
+      var b = el('button', '', 'Zeile ' + m.line);
+      b.type = 'button';
+      b.addEventListener('click', function () { gotoLine(m.line); });
+      li.appendChild(b);
+      li.appendChild(document.createTextNode(' '));
+    }
+    li.appendChild(document.createTextNode(m.msg));
+    return li;
+  }
+  function setStatus(cls, text) {
+    var s = $('status-small');
+    s.className = 'status ' + cls;
+    s.lastChild.textContent = text;
+  }
+
+  var KIND = { out: 'Konsole', net: 'Netz', db: 'Daten', mail: 'Mail', serial: 'Seriell', port: 'Port', mem: 'Speicher', asm: 'Assembler' };
+
+  function render(r) {
+    marks = { err: {}, warn: {} };
+    r.errors.forEach(function (e) { marks.err[e.line] = true; });
+    r.warnings.forEach(function (w) { marks.warn[w.line] = true; });
+    if (r.runtimeError && r.runtimeError.line) marks.err[r.runtimeError.line] = true;
+    layout();
+
+    var check = $('check'), out = $('output'), rep = $('report');
+    clear(check); clear(out); clear(rep);
+
+    var head = el('div', 'status');
+    head.appendChild(el('span', 'dot'));
+    var label = el('span');
+    head.appendChild(label);
+    check.appendChild(head);
+    var list = el('ul', 'msgs');
+
+    if (r.errors.length) {
+      var n = r.errors.length;
+      head.className = 'status bad';
+      label.textContent = n === 1 ? '1 Fehler, das Programm läuft nicht' : n + ' Fehler, das Programm läuft nicht';
+      setStatus('bad', n === 1 ? '1 Fehler' : n + ' Fehler');
+      r.errors.forEach(function (e) { list.appendChild(msgItem(e, '')); });
+    } else if (r.runtimeError) {
+      head.className = 'status bad';
+      label.textContent = 'Geprüft, aber beim Ausführen abgebrochen';
+      setStatus('bad', 'Abgebrochen');
+      list.appendChild(msgItem(r.runtimeError, ''));
+    } else if (r.mainFailed) {
+      head.className = 'status warn';
+      label.textContent = 'Geprüft. main endete mit dem Fehlerwert ' + r.mainResult;
+      setStatus('warn', 'Fehlerwert ' + r.mainResult);
+    } else {
+      head.className = 'status ok';
+      label.textContent = 'Geprüft und ohne Fehler gelaufen';
+      setStatus('ok', 'Gelaufen');
+      if (!r.warnings.length) list.appendChild(msgItem({ line: 0, msg: 'Rechte, ungeprüfte Daten, Geheimnisse und Fehlerfälle sind in Ordnung.' }, 'good'));
+    }
+    r.warnings.forEach(function (w) { list.appendChild(msgItem(w, 'warn')); });
+    if (list.firstChild) check.appendChild(list);
+
+    $('screen-panel').hidden = !r.screen;
+    $('screen').textContent = r.screen ? r.screen.join('\n') : '';
+    if (!r.ran) out.appendChild(el('p', 'hint', 'Nichts wurde ausgeführt, weil die Prüfung Fehler gefunden hat.'));
+    else {
+      if (r.output.length) {
+        var box = el('div', 'out');
+        r.output.forEach(function (o) {
+          var row = el('div');
+          row.appendChild(el('span', 'kind', KIND[o.kind] || o.kind));
+          row.appendChild(el('span', 'text', o.text));
+          box.appendChild(row);
+        });
+        out.appendChild(box);
+      } else out.appendChild(el('p', 'hint', r.screen ? 'Keine weitere Ausgabe neben dem Bildschirm.' : 'Das Programm hat nichts ausgegeben.'));
+      if (r.mainResult !== null && !r.mainFailed) out.appendChild(el('p', 'hint', 'Ergebnis von main: ' + r.mainResult));
+    }
+
+    if (!r.report) { rep.appendChild(el('p', 'hint', 'Der Bericht entsteht, sobald sich das Programm lesen lässt.')); return; }
+    rep.appendChild(el('p', 'sub', 'Das Programm darf'));
+    var chips = el('div', 'chips');
+    if (r.report.program.length) r.report.program.forEach(function (x) { chips.appendChild(el('span', 'chip', x)); });
+    else chips.appendChild(el('span', 'chip pure', 'nichts nach außen'));
+    rep.appendChild(chips);
+    rep.appendChild(el('p', 'sub', 'Funktionen'));
+    r.report.functions.forEach(function (f) {
+      var d = el('div', 'fn');
+      var top = el('div', 'chips');
+      top.appendChild(el('span', 'fn-name', f.name));
+      if (f.assembly) top.appendChild(el('span', 'chip asm', 'Assembler, ungeprüft'));
+      if (f.rights.length) f.rights.forEach(function (x) { top.appendChild(el('span', 'chip', x)); });
+      else if (!f.assembly) top.appendChild(el('span', 'chip pure', 'rein'));
+      d.appendChild(top);
+      var dl = el('dl');
+      function row(k, v) { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); }
+      f.changes.forEach(function (c) { row('verändert', c); });
+      f.takes.forEach(function (c) { row('übernimmt', c); });
+      f.requires.forEach(function (c) { row('verlangt', c); });
+      f.ensures.forEach(function (c) { row('sichert zu', c); });
+      f.assumes.forEach(function (c) { row('nimmt an', '"' + c + '"'); });
+      f.reveals.forEach(function (c) { row('gibt frei', c.text + ' because "' + c.reason + '"'); });
+      if (dl.firstChild) d.appendChild(dl);
+      rep.appendChild(d);
+    });
+    if (!r.errors.length) rep.appendChild(el('p', 'hint', 'Verträge werden in diesem Prototyp beim Ausführen geprüft, noch nicht bewiesen.'));
+  }
+
+  function run(scroll) {
+    var r;
+    try { r = window.Latch.run(code.value, world.value); }
+    catch (e) {
+      r = { errors: [{ line: 0, msg: 'Interner Fehler des Prototyps: ' + (e && e.message ? e.message : e) }], warnings: [], report: null, output: [], ran: false, runtimeError: null, mainResult: null, mainFailed: false };
+    }
+    render(r);
+    if (scroll && window.matchMedia('(max-width: 959px)').matches) {
+      var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      $('results').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    }
+  }
+
+  EXAMPLES.forEach(function (ex, i) {
+    var o = el('option', '', ex.title);
+    o.value = String(i);
+    select.appendChild(o);
+  });
+  function load(i) {
+    code.value = EXAMPLES[i].code;
+    world.value = EXAMPLES[i].world;
+    world.rows = Math.max(3, world.value.split('\n').length + 1);
+    if (EXAMPLES[i].world) $('world-panel').open = true;
+    run(false);
+  }
+  select.addEventListener('change', function () { load(parseInt(select.value, 10)); });
+  code.addEventListener('input', function () { marks = { err: {}, warn: {} }; layout(); setStatus('', 'Geändert, noch nicht geprüft'); });
+  $('run').addEventListener('click', function () { run(true); });
+  load(0);
+})();
+</script>
+</body>
+</html>
