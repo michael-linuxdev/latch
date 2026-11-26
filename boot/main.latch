@@ -1,0 +1,40 @@
+latch 1
+import Screen
+
+// Der erste Kern, der wirklich startet:
+// Der Compiler uebersetzt diese Datei
+// und das Modul Screen nach C. QEMU
+// laedt das Ergebnis als Multiboot-Kern.
+
+function log(msg: Text)
+    uses Port(0x3F8)
+    assumes "COM1 serial port at 0x3F8"
+{
+    for b in Text.bytes(msg) {
+        Port.write(0x3F8, b)
+    }
+    Port.write(0x3F8, 10)
+}
+
+function clear()
+    uses Memory(0xB8000..0xB8F9F)
+{
+    var cur = Screen.start()
+    for i in 1..Screen.WIDTH * Screen.HEIGHT {
+        Screen.put(change cur, 32)
+    }
+}
+
+function main()
+    uses Memory(0xB8000..0xB8F9F),
+         Port(0x3F8)
+{
+    clear()
+    var cur = Screen.start()
+    Screen.print(change cur, "Latch OS")
+    Screen.newline(change cur)
+    Screen.print(change cur,
+        "uebersetzt, nicht nachgebaut")
+    log("Latch OS laeuft")
+    forever { }
+}
