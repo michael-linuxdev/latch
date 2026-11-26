@@ -69,8 +69,14 @@ function main()
         task("uhr", 1),
     ]
     var next = pick(tasks, 2)
-    while next >= 0 {
+    // 2 + 3 + 1 Zeitscheiben:
+    var todo = 6
+    while next >= 0
+        invariant todo >= 0
+        decreases todo
+    {
         step(change tasks, next)
+        todo = todo - 1
         next = pick(tasks, next)
     }
     log("alle Aufgaben fertig")

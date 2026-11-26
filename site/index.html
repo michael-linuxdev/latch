@@ -76,7 +76,7 @@ textarea {
   font: inherit; color: var(--ink); background: transparent; border: 0; margin: 0; resize: none;
   padding: 10px 12px; flex: 1 1 auto; min-width: 0; white-space: pre; overflow-x: auto; overflow-y: hidden; tab-size: 4;
 }
-#world { font-family: var(--font-mono); font-size: 14px; line-height: 21px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; width: 100%; }
+#world, .modfile { font-family: var(--font-mono); font-size: 14px; line-height: 21px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; width: 100%; }
 .runbar { position: sticky; bottom: 0; padding: 10px 14px; background: var(--surface); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 button.run {
   font: inherit; font-weight: 600; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 8px;
@@ -89,6 +89,14 @@ button.run:active { transform: translateY(1px); }
 .status.warn .dot { background: var(--warn); } .status.warn { color: var(--warn); }
 .status.bad .dot { background: var(--bad); } .status.bad { color: var(--bad); }
 .hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
+#modules { display: flex; flex-direction: column; gap: 12px; }
+#modules:empty { display: none; }
+.modwrap { display: flex; flex-direction: column; gap: 6px; }
+.modhead, .modadd { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.modadd input { font: inherit; font-size: 16px; color: var(--ink); background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; flex: 1 1 160px; min-width: 0; }
+button.plain { font: inherit; font-size: 0.875rem; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+ul.msgs li.test { border-left-color: var(--ok); }
+ul.msgs li.test.failed { border-left-color: var(--bad); }
 ul.msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 ul.msgs li { border-left: 3px solid var(--bad); padding: 6px 10px; background: var(--code-bg); border-radius: 0 6px 6px 0; }
 ul.msgs li.warn { border-left-color: var(--warn); }
@@ -122,7 +130,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 <body>
 <div class="page">
   <header>
-    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.7</span></div>
+    <div class="brand"><h1>Latch Prüfstand</h1><span class="tag">Prototyp 0.8</span></div>
     <p class="lede">Latch-Code schreiben, prüfen und ausführen. Der Prüfer zeigt, was das Programm darf, und lehnt ab, was ungeprüfte Daten oder Geheimnisse falsch verwendet.</p>
   </header>
 
@@ -146,8 +154,21 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
       <details class="panel" id="world-panel">
         <summary>Außenwelt (simuliert)</summary>
         <div class="panel-body">
-          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>db tabelle = down</code>, <code>mail = down</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>.</p>
+          <p class="hint">Hier legst du fest, was das Programm von außen bekommt. Eine Angabe pro Zeile: <code>input name = wert</code>, <code>net host/pfad = wert</code>, <code>file name = down</code>, <code>mail = down</code>, <code>env NAME = wert</code>, <code>port 0x60 = 30</code>, <code>keys = getippter text</code>, <code>interrupts = 33 33</code>, <code>forever = 100</code> (Durchläufe, bis der Prüfstand anhält), <code>foreign funktion = wert</code>.</p>
           <textarea id="world" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Simulierte Außenwelt"></textarea>
+        </div>
+      </details>
+
+      <details class="panel" id="modules-panel">
+        <summary>Weitere Dateien (Module)</summary>
+        <div class="panel-body">
+          <p class="hint">Jede Datei ist ein Modul. Das Programm oben holt es mit <code>import Name</code> und sieht davon nur, was <code>public</code> ist.</p>
+          <div id="modules"></div>
+          <div class="modadd">
+            <input id="modname" type="text" placeholder="Name, zum Beispiel Screen" aria-label="Name der neuen Datei" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off">
+            <button class="plain" id="modadd" type="button">Datei anlegen</button>
+          </div>
+          <p class="hint" id="modhint" role="status"></p>
         </div>
       </details>
     </div>
@@ -184,14 +205,25 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
             <li><code>match</code> muss jeden Fall einer Aufzählung abdecken.</li>
             <li>Typen: Argumente, Rückgaben, Felder, Angaben von Varianten, Zuweisungen, Bedingungen und Rechenzeichen müssen zum erklärten Typ passen. Der Fehlertyp hinter <code>fails</code> ist der einzige Fehler, den eine Funktion zurückgeben darf.</li>
             <li>Eingeschränkte Typen (<code>where</code>): Ein Wert passt an seinen Grundtyp, aber nie zurück. Er entsteht nur durch <code>check … as</code> oder als fester Wert, den der Prüfer gegen die Einschränkung nachrechnet.</li>
-            <li>Namen: Typen und Varianten beginnen groß, Funktionen, Variablen, Parameter und Felder klein.</li>
+            <li>Namen: Typen, Varianten und Konstanten beginnen groß, Funktionen, Variablen, Parameter und Felder klein.</li>
+            <li>Rechte kommen aus dem festen Katalog: <code>Net</code>, <code>File</code>, <code>Clock</code>, <code>Random</code>, <code>Env</code>, <code>Process</code>, <code>Console</code>, <code>Memory</code>, <code>Port</code>, <code>Cpu</code>, <code>Tasks</code>, <code>Interrupt</code>.</li>
+            <li>Module: Jede Datei ist ein Modul. Von außen ist nur sichtbar, was <code>public</code> ist. Öffentliche Funktionen brauchen einen Vertrag. <code>destroy</code> geht nur im Modul der Ressource.</li>
+            <li><code>handles Interrupt(n)</code>: keine Parameter, kein Ergebnis, eine Funktion je Nummer. Die Rechte von <code>main</code> sind auch für diese Funktionen die Obergrenze.</li>
+            <li><code>together</code> verlangt <code>uses Tasks</code>. Die Zeilen sehen einander nicht und teilen nichts, was eine von ihnen verändert.</li>
+            <li><code>foreign function</code> hat keinen Rumpf, verlangt eine Annahme und steht im Bericht als ungeprüft.</li>
+            <li><code>const</code> ist ein fester, offener Wert. <code>test</code> ist rein und endet mit einem Wahrheitswert. <code>with</code> ändert nur die Kopie eines Datensatzes.</li>
             <li>Tabellen: <code>xs[i]</code> liest, <code>xs[i] = …</code> und <code>xs[i].feld = …</code> schreiben. Ungeprüfte Werte und Geheimnisse sind als Stelle verboten.</li>
             <li><code>assembly function</code> hat keinen Rumpf, verlangt <code>uses Cpu</code> und eine Annahme und steht im Bericht als ungeprüft.</li>
             <li>Hardware: <code>Memory(a..b)</code> und <code>Port(n)</code> sind Rechte wie alle anderen. Wer eine Funktion aufruft, braucht mindestens deren Bereich.</li>
           </ul>
           <p class="sub">Noch vereinfacht</p>
           <ul>
-            <li>Verträge (<code>requires</code>, <code>ensures</code>) werden beim Ausführen geprüft, nicht bewiesen.</li>
+            <li>Verträge (<code>requires</code>, <code>ensures</code> mit <code>old</code>) sowie <code>invariant</code> und <code>decreases</code> werden beim Ausführen geprüft, nicht bewiesen. Eine <code>while</code>-Schleife ohne <code>decreases</code> gibt nur eine Warnung.</li>
+            <li><code>forever</code> hält der Prüfstand an: nach 100 Durchläufen oder wenn die Außenwelt keine Unterbrechung mehr liefert. Echte Hardware liefe weiter.</li>
+            <li>Unterbrechungen kommen nur zwischen zwei Durchläufen von <code>forever</code> an, nie mitten in einer Funktion. Jede Taste aus <code>keys</code> löst Interrupt 33 aus.</li>
+            <li><code>together</code> führt die Zeilen nacheinander aus, nicht wirklich gleichzeitig.</li>
+            <li>Fremder Code läuft nicht. Das Ergebnis einer <code>foreign function</code> kommt aus der Außenwelt und wird gegen den erklärten Typ geprüft.</li>
+            <li><code>Bits</code> rechnet nur mit Zahlen ab 0 und bis 2<sup>53</sup>.</li>
             <li>Netz, Datenbank, Mail und Kryptografie sind simuliert. Nichts verlässt diese Seite.</li>
             <li>Regionen werden nur geprüft. Speicher gibt der Prototyp nicht wirklich frei.</li>
             <li>Feste Adressen prüft der Prüfer sofort. Berechnete Adressen und Stellen in Tabellen prüft er erst beim Ausführen, echtes Latch müsste sie beweisen.</li>
@@ -203,14 +235,15 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
           </ul>
           <p class="sub">Fehlt noch</p>
           <ul>
-            <li>Beweise für Verträge. Dazu gehören die schon entschiedenen Wörter <code>old</code>, <code>invariant</code>, <code>decreases</code> und <code>forever</code>.</li>
-            <li>Module mit <code>public</code> und <code>import</code>, <code>together</code>, <code>foreign function</code>, <code>handles Interrupt(n)</code>, <code>const</code>, <code>test</code>, <code>hardened</code>, die Bibliothek <code>Bits</code>.</li>
-            <li>Der feste Katalog der Rechte. <code>Db</code>, <code>Input</code> und <code>Console</code> sind Platzhalter des Prüfstands.</li>
+            <li>Beweise für Verträge, Schleifen, Tabellengrenzen und berechnete Adressen. Erst damit gilt: Unbewiesenes läuft nicht.</li>
+            <li>Ein Compiler. Bis dahin auch <code>hardened</code>, die typisierten Texte (<code>sql"…"</code>) und die Anmeldung der Rechte beim Betriebssystem.</li>
+            <li>Bibliothek für <code>Process</code> und für echte Dateien. <code>File</code> ist hier eine Liste von Einträgen je Name.</li>
           </ul>
           <p class="sub">Bibliothek</p>
           <ul>
-            <li><code>Console.print(x)</code>, <code>Input.read("feld")</code>, <code>Net.get("host", pfad)</code></li>
-            <li><code>Db.insert("tabelle", satz)</code>, <code>Db.exists("tabelle", "feld", wert)</code>, <code>Db.count("tabelle")</code></li>
+            <li><code>Console.print(x)</code>, <code>Console.read("feld")</code>, <code>Env.get("NAME")</code>, <code>Net.get("host", pfad)</code></li>
+            <li><code>File.append("name", satz)</code>, <code>File.find("name", "feld", wert)</code>, <code>File.count("name")</code></li>
+            <li><code>Bits.and(a, b)</code>, <code>Bits.or(a, b)</code>, <code>Bits.xor(a, b)</code>, <code>Bits.shift_left(a, n)</code>, <code>Bits.shift_right(a, n)</code>, <code>Bits.test(a, bit)</code></li>
             <li><code>Mail.send("host", an, betreff, text)</code>, <code>Clock.now()</code>, <code>Random.int(a, b)</code></li>
             <li><code>Kem.generate()</code>, <code>Crypto.encrypt(key, text)</code>, <code>Crypto.public_key(key)</code>, <code>Text.contains(text, teil)</code>, <code>Text.bytes(text)</code>, <code>List.at(liste, stelle)</code>, <code>Table.fill(anzahl, wert)</code></li>
             <li><code>Memory.write(adresse, byte)</code>, <code>Memory.read(adresse)</code>, <code>Port.write(port, byte)</code>, <code>Port.read(port)</code></li>
@@ -232,8 +265,7 @@ var KEYWORDS = new Set(['latch', 'import', 'uses', 'function', 'return', 'let', 
   'reveal', 'because', 'with', 'true', 'false', 'and', 'not', 'destroy', 'fails', 'assembly', 'foreign', 'handles', 'old', 'invariant', 'decreases', 'forever',
   'public', 'module', 'test', 'hardened', 'break', 'continue', 'const', 'async']);
 
-var NOT_YET = { together: 1, import: 1, with: 1, foreign: 1, handles: 1, old: 1, invariant: 1, decreases: 1, forever: 1, public: 1, module: 1,
-  test: 1, hardened: 1, break: 1, continue: 1, const: 1, async: 1 };
+var NOT_YET = { module: 1, hardened: 1, break: 1, continue: 1, async: 1 };
 
 function LatchError(msg, line) { this.message = msg; this.line = line || 0; }
 
@@ -347,31 +379,82 @@ Parser.prototype = {
     return t.parts[0].text;
   },
 
+  parseQual: function (what) {
+    var t = this.expectId(what), name = t.v;
+    if (/^[A-Z]/.test(name) && this.isSym('.') && this.peek(1).t === 'id' && /^[A-Z]/.test(this.peek(1).v)) { this.next(); name += '.' + this.next().v; }
+    return { v: name, line: t.line };
+  },
+  parseFieldInits: function () {
+    var fields = [];
+    this.expectSym('{');
+    while (!this.isSym('}')) {
+      var fname = this.expectId('Feldname');
+      var fe;
+      if (this.isSym(':')) { this.next(); fe = this.parseExpr(); }
+      else fe = { k: 'Var', name: fname.v, line: fname.line };
+      fields.push({ name: fname.v, expr: fe });
+      if (this.isSym(',')) this.next(); else break;
+    }
+    this.expectSym('}');
+    return fields;
+  },
+  parseClause: function () {
+    var s = this.peek().start, saved = this.noStruct;
+    this.noStruct = true;
+    var ex = this.parseExpr();
+    this.noStruct = saved;
+    return { expr: ex, text: this.src.slice(s, this.toks[this.p - 1].end).replace(/\s+/g, ' ') };
+  },
+
   parseProgram: function () {
-    var prog = { types: [], enums: [], funcs: [] };
+    var prog = { types: [], enums: [], funcs: [], consts: [], tests: [], imports: [] };
     if (!this.isKw('latch')) this.fail('Jede Datei beginnt mit der Versionszeile "latch 1".');
     this.next();
     var v = this.peek();
     if (v.t !== 'num' || v.v !== 1) this.fail('Dieser Prototyp versteht nur "latch 1".');
     this.next();
+    while (this.isKw('import')) {
+      var it = this.next();
+      prog.imports.push({ name: this.expectId('Modulname').v, line: it.line });
+    }
     while (this.peek().t !== 'eof') {
+      var pub = false, d = null;
+      if (this.isKw('public')) {
+        this.next();
+        pub = true;
+        if (!(this.peek().t === 'kw' && ['type', 'enum', 'resource', 'function', 'assembly', 'foreign', 'const'].indexOf(this.peek().v) >= 0))
+          this.fail('Nach public folgt type, enum, resource, const oder function.');
+      }
       var t = this.peek();
-      if (this.isKw('type')) prog.types.push(this.parseType());
-      else if (this.isKw('enum')) prog.enums.push(this.parseEnum());
+      if (this.isKw('type')) prog.types.push(d = this.parseType());
+      else if (this.isKw('enum')) prog.enums.push(d = this.parseEnum());
       else if (this.isKw('resource')) {
         var rl = this.next().line;
         var rn = this.expectId('Typname').v;
         if (this.isSym('=')) this.fail('Eine Ressource wird ohne "=" geschrieben: resource ' + rn + ' { ... }');
-        prog.types.push({ kind: 'resource', name: rn, fields: this.parseFields(), line: rl });
+        prog.types.push(d = { kind: 'resource', name: rn, fields: this.parseFields(), line: rl });
       }
-      else if (this.isKw('function')) prog.funcs.push(this.parseFunc(false));
-      else if (this.isKw('assembly')) {
-        this.next();
-        if (!this.isKw('function')) this.fail('Nach assembly folgt function.');
-        prog.funcs.push(this.parseFunc(true));
+      else if (this.isKw('function')) prog.funcs.push(d = this.parseFunc(false));
+      else if (this.isKw('assembly') || this.isKw('foreign')) {
+        var kind = this.next().v;
+        if (!this.isKw('function')) this.fail('Nach ' + kind + ' folgt function.');
+        prog.funcs.push(d = this.parseFunc(kind));
       }
+      else if (this.isKw('const')) {
+        var cl = this.next().line, cn = this.expectId('Name der Konstante').v, ct = null;
+        if (this.isSym(':')) { this.next(); ct = this.parseTypeRef(); }
+        this.expectSym('=');
+        prog.consts.push(d = { name: cn, type: ct, e: this.parseExpr(), line: cl });
+      }
+      else if (this.isKw('test')) {
+        var tl = this.next().line;
+        var tn = this.expectPlainStr('Der Name eines Tests');
+        prog.tests.push({ name: tn, body: this.parseBlock(), line: tl });
+      }
+      else if (this.isKw('import')) this.fail('import steht am Dateianfang, direkt nach "latch 1".');
       else if (t.t === 'kw' && NOT_YET[t.v]) this.fail('"' + t.v + '" gehört zu Latch, wird vom Prototyp aber noch nicht unterstützt.');
-      else this.fail('Auf oberster Ebene stehen nur type, resource, enum und function. Gefunden wurde ' + this.describe(t) + '.');
+      else this.fail('Auf oberster Ebene stehen nur import, type, resource, enum, const, function und test. Gefunden wurde ' + this.describe(t) + '.');
+      if (d) d.public = pub;
     }
     return prog;
   },
@@ -382,7 +465,7 @@ Parser.prototype = {
       if (inner) this.fail('unchecked und secret stehen ganz vorn am Typ, nicht in spitzen Klammern.');
       taint = this.next().v;
     }
-    var nt = this.expectId('Typname'), name = nt.v, args = [];
+    var nt = this.parseQual('Typname'), name = nt.v, args = [];
     if (this.isSym('<')) {
       do {
         this.next();
@@ -413,7 +496,7 @@ Parser.prototype = {
     var name = this.expectId('Typname').v;
     this.expectSym('=');
     if (this.isSym('{')) return { kind: 'record', name: name, fields: this.parseFields(), line: line };
-    var base = this.expectId('Typname').v;
+    var base = this.parseQual('Typname').v;
     var where = null, whereText = null;
     if (this.isKw('where')) {
       this.next();
@@ -454,11 +537,11 @@ Parser.prototype = {
     return { name: name, variants: variants, line: line };
   },
 
-  parseFunc: function (asm) {
-    var line = this.next().line;
+  parseFunc: function (kind) {
+    var line = this.next().line, asm = kind === 'assembly';
     var name = this.expectId('Funktionsname').v;
-    var fn = { name: name, line: line, params: [], ret: null, retTaint: 'clean', errType: null,
-      rights: [], requires: [], ensures: [], assumes: [], body: null, assembly: !!asm };
+    var fn = { name: name, line: line, params: [], ret: null, retTaint: 'clean', errType: null, handles: null,
+      rights: [], requires: [], ensures: [], assumes: [], body: null, assembly: asm, foreign: kind === 'foreign' };
     this.expectSym('(');
     while (!this.isSym(')')) {
       var mode = 'read';
@@ -474,16 +557,23 @@ Parser.prototype = {
       this.next();
       var rt = this.parseTypeRef();
       fn.ret = rt.name; fn.retRef = rt; fn.retTaint = rt.taint;
-      if (this.isKw('fails')) { this.next(); fn.errType = this.expectId('Fehlertyp').v; }
+      if (this.isKw('fails')) { this.next(); fn.errType = this.parseQual('Fehlertyp').v; }
       else if (this.isKw('or')) this.fail('Der Fehlertyp wird mit fails geschrieben, zum Beispiel: -> Int fails SignupError');
     }
-    var order = ['uses', 'requires', 'ensures', 'assumes'], stage = 0;
+    var order = ['handles', 'uses', 'requires', 'ensures', 'assumes'], stage = 0;
     while (this.peek().t === 'kw' && order.indexOf(this.peek().v) >= 0) {
       var kw = this.peek(), idx = order.indexOf(kw.v);
-      if (idx < stage) this.fail('Die Reihenfolge im Funktionskopf ist fest: uses, requires, ensures, assumes.');
+      if (idx < stage) this.fail('Die Reihenfolge im Funktionskopf ist fest: handles, uses, requires, ensures, assumes.');
       stage = idx;
       this.next();
-      if (kw.v === 'uses') {
+      if (kw.v === 'handles') {
+        if (fn.handles) this.fail('handles steht nur einmal im Kopf.', kw);
+        var hn = this.expectId('Interrupt(n)');
+        if (hn.v !== 'Interrupt' || !this.isSym('(') || this.peek(1).t !== 'num') this.fail('Nach handles folgt Interrupt(n) mit einer festen Nummer, zum Beispiel: handles Interrupt(33)', hn);
+        this.next();
+        fn.handles = { n: this.next().v, line: kw.line };
+        this.expectSym(')');
+      } else if (kw.v === 'uses') {
         if (fn.rights.length) this.fail('uses steht nur einmal im Kopf. Mehrere Rechte mit Komma trennen.', kw);
         do {
           if (fn.rights.length) this.next();
@@ -516,9 +606,10 @@ Parser.prototype = {
       }
     }
     if (this.isSym('->')) this.fail('Der Rückgabetyp (->) steht direkt nach den Parametern, vor uses.');
-    if (asm) {
-      if (this.isSym('{')) this.fail('Eine assembly-Funktion hat keinen Latch-Rumpf. Ihr Inhalt ist Assembler und steht außerhalb.');
-      if (fn.ret) this.fail('assembly-Funktionen mit Rückgabewert kennt der Prototyp noch nicht.', { line: line });
+    if (kind) {
+      if (this.isSym('{')) this.fail(asm ? 'Eine assembly-Funktion hat keinen Latch-Rumpf. Ihr Inhalt ist Assembler und steht außerhalb.'
+        : 'Eine foreign-Funktion hat keinen Latch-Rumpf. Ihr Inhalt ist fremder Code und steht außerhalb.');
+      if (asm && fn.ret) this.fail('assembly-Funktionen mit Rückgabewert kennt der Prototyp noch nicht.', { line: line });
       return fn;
     }
     fn.body = this.parseBlock();
@@ -581,8 +672,34 @@ Parser.prototype = {
       if (t.v === 'if') return this.parseIf();
       if (t.v === 'while') {
         this.next();
-        var wc = this.parseCond();
-        return { k: 'While', cond: wc, body: this.parseBlock(), line: t.line };
+        var wc = this.parseCond(), invs = [], dec = null;
+        while (this.isKw('invariant') || this.isKw('decreases')) {
+          var ck = this.next(), cl2 = this.parseClause();
+          cl2.line = ck.line;
+          if (ck.v === 'invariant') {
+            if (dec) this.fail('Die Reihenfolge ist fest: erst invariant, dann decreases.', ck);
+            invs.push(cl2);
+          } else {
+            if (dec) this.fail('decreases steht nur einmal an einer Schleife.', ck);
+            dec = cl2;
+          }
+        }
+        return { k: 'While', cond: wc, invariants: invs, decreases: dec, body: this.parseBlock(), line: t.line };
+      }
+      if (t.v === 'forever') {
+        this.next();
+        return { k: 'Forever', body: this.parseBlock(), line: t.line };
+      }
+      if (t.v === 'together') {
+        this.next();
+        this.expectSym('{');
+        var lets = [];
+        while (!this.isSym('}')) {
+          if (!this.isKw('let')) this.fail('In together steht in jeder Zeile ein let, zum Beispiel: let a = weather(berlin)');
+          lets.push(this.parseStmt());
+        }
+        this.expectSym('}');
+        return { k: 'Together', lets: lets, line: t.line };
       }
       if (t.v === 'for') {
         this.next();
@@ -630,7 +747,7 @@ Parser.prototype = {
     var arms = [];
     this.expectSym('{');
     while (!this.isSym('}')) {
-      var nt = this.expectId('Name der Variante');
+      var nt = this.parseQual('Name der Variante');
       var binds = [];
       if (this.isSym('(')) {
         this.next();
@@ -705,7 +822,7 @@ Parser.prototype = {
         var e = this.parseUnary();
         if (!this.isKw('as')) this.fail('Nach check folgt "as" und ein Typ, zum Beispiel: check raw as Age');
         this.next();
-        var ty = this.expectId('Typname').v;
+        var ty = this.parseQual('Typname').v;
         return { k: 'Check', e: e, type: ty, line: t.line };
       }
       if (t.v === 'try') { this.next(); return { k: 'Try', e: this.parseUnary(), line: t.line }; }
@@ -740,7 +857,13 @@ Parser.prototype = {
   },
   parsePostfix: function () {
     var e = this.parsePrimary();
-    while (this.isSym('.') || (this.isSym('[') && this.peek().line === this.toks[this.p - 1].line)) {
+    while (this.isSym('.') || (this.isSym('[') && this.peek().line === this.toks[this.p - 1].line) || (this.isKw('with') && !this.noStruct)) {
+      if (this.isKw('with')) {
+        var wt = this.next();
+        if (!this.isSym('{')) this.fail('Nach with folgen die geänderten Felder: satz with { feld: wert }');
+        e = { k: 'With', obj: e, fields: this.parseFieldInits(), line: wt.line };
+        continue;
+      }
       if (this.isSym('[')) {
         var bt = this.next();
         var savedNs = this.noStruct;
@@ -801,30 +924,30 @@ Parser.prototype = {
       this.next();
       var upper = /^[A-Z]/.test(t.v);
       if (upper) {
-        if (this.isSym('.') && this.peek(1).t === 'id' && this.isSym('(', 2)) {
+        var uname = t.v;
+        if (this.isSym('.') && this.peek(1).t === 'id' && /^[A-Z]/.test(this.peek(1).v)) { this.next(); uname += '.' + this.next().v; }
+        else if (this.isSym('.') && (this.peek(1).t === 'id' || this.peek(1).t === 'kw') && this.isSym('(', 2)) {
           this.next();
           var fn = this.next().v;
           return { k: 'MCall', mod: t.v, fn: fn, args: this.parseArgs(), line: t.line };
         }
-        if (this.isSym('{') && !this.noStruct) {
-          this.next();
-          var fields = [];
-          while (!this.isSym('}')) {
-            var fname = this.expectId('Feldname');
-            var fe;
-            if (this.isSym(':')) { this.next(); fe = this.parseExpr(); }
-            else fe = { k: 'Var', name: fname.v, line: fname.line };
-            fields.push({ name: fname.v, expr: fe });
-            if (this.isSym(',')) this.next(); else break;
-          }
-          this.expectSym('}');
-          return { k: 'Record', type: t.v, fields: fields, line: t.line };
-        }
-        if (this.isSym('(') && this.peek().line === t.line) return { k: 'Variant', name: t.v, args: this.parseArgs(), line: t.line };
-        return { k: 'Variant', name: t.v, args: [], line: t.line };
+        if (this.isSym('{') && !this.noStruct) return { k: 'Record', type: uname, fields: this.parseFieldInits(), line: t.line };
+        if (this.isSym('(') && this.peek().line === this.toks[this.p - 1].line) return { k: 'Variant', name: uname, args: this.parseArgs(), line: t.line };
+        return { k: 'Variant', name: uname, args: [], line: t.line };
       }
       if (this.isSym('(') && this.peek().line === t.line) return { k: 'Call', name: t.v, args: this.parseArgs(), line: t.line };
       return { k: 'Var', name: t.v, line: t.line };
+    }
+    if (t.t === 'kw' && t.v === 'old') {
+      this.next();
+      if (!this.isSym('(')) this.fail('old braucht Klammern: old(wert) ist der Wert vor dem Aufruf.');
+      this.next();
+      var savedOld = this.noStruct;
+      this.noStruct = false;
+      var oe = this.parseExpr();
+      this.noStruct = savedOld;
+      this.expectSym(')');
+      return { k: 'Old', e: oe, line: t.line };
     }
     if (t.t === 'kw' && NOT_YET[t.v]) this.fail('"' + t.v + '" gehört zu Latch, wird vom Prototyp aber noch nicht unterstützt.');
     this.fail('Hier wird ein Wert erwartet, gefunden wurde ' + this.describe(t) + '.');
@@ -834,11 +957,12 @@ Parser.prototype = {
 /* ---------- Built-in library (simulated outside world) ---------- */
 var BUILTINS = {
   'Console.print': { right: 'Console', n: 1, ret: 'clean', p: ['Any'], r: 'Done' },
-  'Input.read': { right: 'Input', n: 1, ret: 'unchecked', p: ['Text'], r: 'Text' },
+  'Console.read': { right: 'Console', n: 1, ret: 'unchecked', p: ['Text'], r: 'Text' },
+  'Env.get': { right: 'Env', n: 1, ret: 'unchecked', p: ['Text'], r: 'Text' },
   'Net.get': { right: 'Net', lit: true, n: 2, ret: 'unchecked', p: ['Text', 'Text'], r: 'Text' },
-  'Db.insert': { right: 'Db', lit: true, n: 2, ret: 'clean', fallible: 'DbError', p: ['Text', 'Any'], r: 'Int' },
-  'Db.exists': { right: 'Db', lit: true, n: 3, ret: 'clean', p: ['Text', 'Text', 'Any'], r: 'Bool' },
-  'Db.count': { right: 'Db', lit: true, n: 1, ret: 'clean', p: ['Text'], r: 'Int' },
+  'File.append': { right: 'File', lit: true, n: 2, ret: 'clean', fallible: 'FileError', p: ['Text', 'Any'], r: 'Int' },
+  'File.find': { right: 'File', lit: true, n: 3, ret: 'clean', p: ['Text', 'Text', 'Any'], r: 'Bool' },
+  'File.count': { right: 'File', lit: true, n: 1, ret: 'clean', p: ['Text'], r: 'Int' },
   'Mail.send': { right: 'Net', lit: true, n: 4, ret: 'clean', fallible: 'MailError', p: ['Text', 'Text', 'Text', 'Text'], r: 'Done' },
   'Clock.now': { right: 'Clock', n: 0, ret: 'clean', p: [], r: 'Int' },
   'Random.int': { right: 'Random', n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
@@ -849,6 +973,12 @@ var BUILTINS = {
   'Text.bytes': { right: null, n: 1, ret: 'clean', p: ['Text'], r: 'Ints' },
   'List.at': { right: null, n: 2, ret: 'clean', fallible: 'Missing', p: ['List', 'Int'], r: 'Elem' },
   'Table.fill': { right: null, n: 2, ret: 'clean', p: ['Int', 'Any'], r: 'Fill' },
+  'Bits.and': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
+  'Bits.or': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
+  'Bits.xor': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
+  'Bits.shift_left': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
+  'Bits.shift_right': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Int' },
+  'Bits.test': { right: null, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Bool' },
   'Memory.write': { right: 'Memory', hw: true, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Done' },
   'Memory.read': { right: 'Memory', hw: true, n: 1, ret: 'clean', p: ['Int'], r: 'Int' },
   'Port.write': { right: 'Port', hw: true, n: 2, ret: 'clean', p: ['Int', 'Int'], r: 'Done' },
@@ -856,9 +986,28 @@ var BUILTINS = {
 };
 var VGA_BASE = 0xB8000, VGA_COLS = 80, VGA_ROWS = 25, VGA_END = VGA_BASE + VGA_COLS * VGA_ROWS * 2 - 1;
 function hex(n) { return '0x' + n.toString(16).toUpperCase(); }
+var CATALOG = ['Net', 'File', 'Clock', 'Random', 'Env', 'Process', 'Console', 'Memory', 'Port', 'Cpu', 'Tasks', 'Interrupt'];
+var LIBMODS = {};
+Object.keys(BUILTINS).forEach(function (q) { LIBMODS[q.split('.')[0]] = true; });
+function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+function kids(e) {
+  switch (e.k) {
+    case 'Str': return e.parts.filter(function (p) { return p.expr; }).map(function (p) { return p.expr; });
+    case 'Field': return [e.obj];
+    case 'Index': return [e.obj, e.idx];
+    case 'Mode': case 'Un': case 'Try': case 'Secret': case 'Reveal': case 'RegionNew': case 'Old': case 'Check': return [e.e];
+    case 'Bin': return [e.l, e.r];
+    case 'List': return e.items;
+    case 'Call': case 'MCall': case 'Variant': return e.args;
+    case 'Record': return e.fields.map(function (f) { return f.expr; });
+    case 'With': return [e.obj].concat(e.fields.map(function (f) { return f.expr; }));
+  }
+  return [];
+}
 function fold(e) {
   if (!e) return null;
   if (e.k === 'Num') return e.v;
+  if (e.k === 'Variant' && e.isConst) return e.cv && typeof e.cv.v === 'number' ? e.cv.v : null;
   if (e.k === 'Un' && e.op === '-') { var u = fold(e.e); return u === null ? null : -u; }
   if (e.k === 'Bin' && (e.op === '+' || e.op === '-' || e.op === '*')) {
     var l = fold(e.l), r = fold(e.r);
@@ -873,7 +1022,7 @@ function covers(d, n) {
   if (n.arg !== null && n.arg !== undefined) return d.arg === n.arg;
   return true;
 }
-var BUILTIN_ERRORS = ['CheckFailed', 'DbError', 'MailError', 'Missing'];
+var BUILTIN_ERRORS = ['CheckFailed', 'FileError', 'MailError', 'Missing'];
 var SCAN = (function () {
   var map = { ' ': 0x39, '\n': 0x1C };
   [['qwertyuiop', 0x10], ['asdfghjkl', 0x1E], ['zxcvbnm', 0x2C], ['1234567890', 0x02]].forEach(function (row) {
@@ -888,11 +1037,131 @@ function fmtRight(r) {
   return r.arg === null || r.arg === undefined ? r.name : r.name + '("' + r.arg + '")';
 }
 
+/* ---------- Module ----------
+   Jede Datei ist ein Modul. Die Namen eines importierten Moduls bekommen intern den Modulnamen davor
+   (Screen.put, Screen.Cursor). Danach arbeiten Prüfer und Interpreter auf einem einzigen Programm. */
+function parseSource(src) { return new Parser(lex(src), src).parseProgram(); }
+function linkProgram(main, modules) {
+  var errors = [], loaded = {}, list = [main];
+  main.module = '';
+  function load(name, line, from) {
+    if (own(loaded, name)) return;
+    loaded[name] = null;
+    var fail = function (l, msg, mod) { var o = { line: l, msg: msg }; if (mod) o.module = mod; errors.push(o); };
+    if (!/^[A-Z]/.test(name)) return fail(line, 'Modulnamen beginnen mit einem Großbuchstaben: import ' + name.charAt(0).toUpperCase() + name.slice(1), from);
+    if (LIBMODS[name]) return fail(line, name + ' gehört zur Bibliothek und wird nicht importiert.', from);
+    if (!modules || !own(modules, name)) return fail(line, 'Das Modul ' + name + ' ist nicht vorhanden. Jede Datei ist ein Modul, es fehlt die Datei für ' + name + '.', from);
+    var prog;
+    try { prog = parseSource(modules[name]); }
+    catch (ex) { if (ex instanceof LatchError) return fail(ex.line, ex.message, name); throw ex; }
+    prog.module = name;
+    loaded[name] = prog;
+    list.push(prog);
+    prog.imports.forEach(function (i) { load(i.name, i.line, name); });
+  }
+  main.imports.forEach(function (i) { load(i.name, i.line, ''); });
+
+  var exists = {}, pubs = {};
+  list.forEach(function (prog) {
+    var ex = {}, pb = {};
+    function add(d) { ex[d.name] = true; if (d.public) pb[d.name] = true; }
+    prog.types.forEach(add); prog.funcs.forEach(add); prog.consts.forEach(add);
+    prog.enums.forEach(function (e) { add(e); e.variants.forEach(function (v) { ex[v.name] = true; if (e.public) pb[v.name] = true; }); });
+    prog.own = ex;
+    if (prog.module) { exists[prog.module] = ex; pubs[prog.module] = pb; }
+  });
+
+  list.forEach(function (prog) {
+    var P = prog.module ? prog.module + '.' : '', imports = {};
+    prog.imports.forEach(function (i) { if (loaded[i.name]) imports[i.name] = true; });
+    function E(line, msg) { var o = { line: line, msg: msg }; if (prog.module) o.module = prog.module; errors.push(o); }
+    function q(name, line) {
+      var dot = name.indexOf('.');
+      if (dot < 0) return own(prog.own, name) ? P + name : name;
+      var m = name.slice(0, dot), b = name.slice(dot + 1);
+      if (!imports[m]) { if (!own(loaded, m) || loaded[m]) E(line, 'Das Modul ' + m + ' ist hier nicht importiert. Am Dateianfang ergänzen: import ' + m); }
+      else if (!own(exists[m], b)) E(line, 'Das Modul ' + m + ' hat nichts mit dem Namen ' + b + '.');
+      else if (!own(pubs[m], b)) E(line, b + ' ist in ' + m + ' nicht public und von außen nicht sichtbar.');
+      return name;
+    }
+    function tref(r) {
+      if (!r) return;
+      r.base = q(r.base, r.line);
+      r.args.forEach(function (a) { if (typeof a !== 'number') tref(a); });
+      r.name = r.base + (r.args.length ? '<' + r.args.map(function (a) { return typeof a === 'number' ? a : a.name; }).join(', ') + '>' : '');
+    }
+    function ex(e) {
+      if (!e) return;
+      kids(e).forEach(ex);
+      if (e.k === 'Call') e.name = q(e.name, e.line);
+      else if (e.k === 'Variant') e.name = q(e.name, e.line);
+      else if (e.k === 'Record') e.type = q(e.type, e.line);
+      else if (e.k === 'Check') e.type = q(e.type, e.line);
+      else if (e.k === 'MCall' && !LIBMODS[e.mod] && (own(loaded, e.mod) || (modules && own(modules, e.mod)))) {
+        e.k = 'Call';
+        e.name = q(e.mod + '.' + e.fn, e.line);
+      }
+    }
+    function other(o) { if (o) { if (o.k === 'ret') ex(o.e); else block(o.body); } }
+    function block(stmts) { stmts.forEach(st); }
+    function st(s) {
+      switch (s.k) {
+        case 'Let': tref(s.type); ex(s.e); other(s.other); break;
+        case 'Assign': case 'FieldAssign': ex(s.e); break;
+        case 'Store': ex(s.idx); ex(s.e); break;
+        case 'Return': case 'Expr': ex(s.e); other(s.other); break;
+        case 'If': ex(s.cond); block(s.then); if (s.els) block(s.els); break;
+        case 'While': ex(s.cond); s.invariants.forEach(function (c) { ex(c.expr); }); if (s.decreases) ex(s.decreases.expr); block(s.body); break;
+        case 'For': ex(s.e); block(s.body); break;
+        case 'Region': case 'Forever': block(s.body); break;
+        case 'Together': block(s.lets); break;
+        case 'Match': ex(s.e); s.arms.forEach(function (a) { a.name = q(a.name, a.line); block(a.body); }); break;
+      }
+    }
+    prog.types.forEach(function (t) {
+      t.module = prog.module; t.name = P + t.name;
+      if (t.kind === 'refined') { t.base = q(t.base, t.line); ex(t.where); }
+      else t.fields.forEach(function (f) { tref(f.type); });
+    });
+    prog.enums.forEach(function (e) {
+      e.module = prog.module; e.name = P + e.name;
+      e.variants.forEach(function (v) { v.name = P + v.name; v.ftypes.forEach(tref); });
+    });
+    prog.consts.forEach(function (c) { c.module = prog.module; c.name = P + c.name; tref(c.type); ex(c.e); });
+    prog.funcs.forEach(function (f) {
+      f.module = prog.module; f.short = f.name; f.name = P + f.name;
+      f.params.forEach(function (pa) { tref(pa.tref); pa.type = pa.tref.name; });
+      if (f.retRef) { tref(f.retRef); f.ret = f.retRef.name; }
+      if (f.errType) f.errType = q(f.errType, f.line);
+      f.requires.forEach(function (c) { ex(c.expr); });
+      f.ensures.forEach(function (c) { ex(c.expr); });
+      if (f.body) block(f.body);
+    });
+    prog.tests.forEach(function (t) { t.module = prog.module; block(t.body); });
+  });
+
+  var all = { types: [], enums: [], funcs: [], consts: [], tests: [] };
+  list.slice(1).concat([main]).forEach(function (prog) {
+    Object.keys(all).forEach(function (k) { all[k] = all[k].concat(prog[k]); });
+  });
+  all.modules = list.slice(1).map(function (prog) { return prog.module; });
+  return { prog: all, errors: errors };
+}
+
 /* ---------- Static checker ---------- */
 function checkProgram(prog) {
-  var errors = [], warnings = [], seen = {};
-  function err(line, msg) { var key = line + '|' + msg; if (!seen[key]) { seen[key] = 1; errors.push({ line: line, msg: msg }); } }
-  var types = {}, variants = {}, funcs = {}, enums = {};
+  var errors = [], warnings = [], seen = {}, curMod = '';
+  function err(line, msg) {
+    var key = curMod + '|' + line + '|' + msg;
+    if (seen[key]) return;
+    seen[key] = 1;
+    var o = { line: line, msg: msg };
+    if (curMod) o.module = curMod;
+    errors.push(o);
+  }
+  function warn(line, msg) { var o = { line: line, msg: msg }; if (curMod) o.module = curMod; warnings.push(o); }
+  function each(list, fn) { list.forEach(function (d) { curMod = d.module || ''; fn(d); }); curMod = ''; }
+  var types = {}, variants = {}, funcs = {}, enums = {}, consts = {}, handlers = {}, mainUsed = null;
   BUILTIN_ERRORS.forEach(function (e) { variants[e] = { enumName: e, fields: [], ftypesT: [] }; enums[e] = [e]; });
   variants.Done = { enumName: 'Done', fields: [], ftypesT: [] };
   enums.Done = ['Done'];
@@ -908,11 +1177,13 @@ function checkProgram(prog) {
     return t.n + '<' + t.a.map(function (x) { return typeof x === 'number' ? String(x) : tstr(x); }).join(', ') + '>';
   }
   function upperName(name, what, line) {
+    name = name.slice(name.lastIndexOf('.') + 1);
     if (/^[A-Z]/.test(name)) return;
     var fix = name.charAt(0).toUpperCase() + name.slice(1);
     err(line, what + ' beginnen mit einem Großbuchstaben' + (fix !== name ? ': ' + fix + ' statt ' + name : ', ' + name + ' tut das nicht') + '.');
   }
   function lowerName(name, what, line) {
+    name = name.slice(name.lastIndexOf('.') + 1);
     if (!/^[A-Z]/.test(name)) return;
     err(line, what + ' beginnen mit einem Kleinbuchstaben: ' + name.charAt(0).toLowerCase() + name.slice(1) + ' statt ' + name + '.');
   }
@@ -954,6 +1225,7 @@ function checkProgram(prog) {
   function constOf(e) {
     if (e.k === 'Num' || e.k === 'Bool') return { v: e.v };
     if (e.k === 'Str' && e.parts.length === 1 && e.parts[0].text !== undefined) return { v: e.parts[0].text };
+    if (e.k === 'Variant' && e.isConst) return e.cv;
     var n = fold(e);
     return n === null ? null : { v: n };
   }
@@ -968,7 +1240,7 @@ function checkProgram(prog) {
     if (!isRefined(to)) return false;
     var c = constOf(e);
     if (!c || !assignable(from, root(to))) return false;
-    proofs.push({ v: c.v, type: to.n, line: line });
+    proofs.push({ v: c.v, type: to.n, line: line, module: curMod });
     return true;
   }
   function fits(e, from, to, line, what) {
@@ -1041,12 +1313,12 @@ function checkProgram(prog) {
   }
   var LIB = { Any: T_ANY, Int: T_INT, Text: T_TEXT, Bool: T_BOOL, Done: T_DONE, Ints: T('List', [T_INT]), List: T('List', [null]) };
 
-  prog.types.forEach(function (t) {
+  each(prog.types, function (t) {
     if (types[t.name] || BASE_TYPES.indexOf(t.name) >= 0 || GENERIC.indexOf(t.name) >= 0 || enums[t.name]) err(t.line, 'Der Typ ' + t.name + ' ist schon vergeben.');
     upperName(t.name, 'Typnamen', t.line);
     types[t.name] = t;
   });
-  prog.enums.forEach(function (e) {
+  each(prog.enums, function (e) {
     if (enums[e.name] || types[e.name] || BASE_TYPES.indexOf(e.name) >= 0 || GENERIC.indexOf(e.name) >= 0) err(e.line, 'Der Name ' + e.name + ' ist schon vergeben.');
     upperName(e.name, 'Typnamen', e.line);
     enums[e.name] = e.variants.map(function (v) { return v.name; });
@@ -1054,24 +1326,38 @@ function checkProgram(prog) {
       if (variants[v.name]) err(v.line, 'Die Variante ' + v.name + ' ist schon vergeben.');
       upperName(v.name, 'Varianten', v.line);
       v.fields.forEach(function (fname) { lowerName(fname, 'Feldnamen', v.line); });
-      variants[v.name] = { enumName: e.name, fields: v.fields, ftypes: v.ftypes, ftypesT: [], line: v.line };
+      variants[v.name] = { enumName: e.name, fields: v.fields, ftypes: v.ftypes, ftypesT: [], line: v.line, module: e.module || '' };
     });
   });
   function isRes(name) { return !!(name && types[name] && types[name].kind === 'resource'); }
-  prog.types.forEach(function (t) {
+  each(prog.types, function (t) {
     if (t.kind === 'record' || t.kind === 'resource') t.fields.forEach(function (f) {
       if (isRes(f.type.name)) err(t.line, 'Das Feld ' + f.name + ' ist selbst eine Ressource. Das kennt der Prototyp noch nicht.');
     });
   });
-  prog.funcs.forEach(function (f) {
+  each(prog.funcs, function (f) {
     if (funcs[f.name]) err(f.line, 'Die Funktion ' + f.name + ' gibt es schon.');
     funcs[f.name] = f;
     if (f.errType && !enums[f.errType]) err(f.line, 'Der Fehlertyp ' + f.errType + ' ist nicht bekannt. Als enum anlegen.');
     lowerName(f.name, 'Funktionsnamen', f.line);
-    f.rights.forEach(function (r) { upperName(r.name, 'Rechte', r.line); });
+    f.rights.forEach(function (r) {
+      if (CATALOG.indexOf(r.name) < 0) err(r.line, 'Das Recht ' + r.name + ' gibt es nicht. Der Katalog ist fest: ' + CATALOG.join(', ') + '.');
+    });
+    if (f.errType && f.ret === f.errType) err(f.line, 'Ergebnis und Fehlertyp von ' + f.name + ' sind derselbe Typ (' + f.ret + '). Dann wäre unklar, was ein return bedeutet. Zwei verschiedene Typen verwenden.');
+    if (f.public && !f.requires.length && !f.ensures.length && !f.assembly && !f.foreign)
+      err(f.line, 'Die öffentliche Funktion ' + f.name + ' braucht einen Vertrag: requires oder ensures im Kopf.');
+    if (f.handles) {
+      var hn = f.handles.n;
+      if (hn > 255) err(f.handles.line, 'Unterbrechungen haben die Nummern 0 bis 255, vorhanden ist ' + hn + '.');
+      if (f.params.length) err(f.line, f.name + ' behandelt eine Unterbrechung und hat deshalb keine Parameter. Niemand ruft sie mit Werten auf.');
+      if (f.ret) err(f.line, f.name + ' behandelt eine Unterbrechung und gibt deshalb nichts zurück. Es gibt keinen Aufrufer, der das Ergebnis bekäme.');
+      if (f.assembly || f.foreign) err(f.line, 'handles steht nur an Funktionen mit Latch-Rumpf.');
+      if (handlers[hn]) err(f.handles.line, 'Interrupt(' + hn + ') wird schon von ' + handlers[hn].name + ' behandelt. Jede Unterbrechung hat genau eine Funktion.');
+      else handlers[hn] = f;
+    }
   });
   /* Alle Typangaben auflösen, bevor Rümpfe geprüft werden. */
-  prog.types.forEach(function (t) {
+  each(prog.types, function (t) {
     if (t.kind !== 'record' && t.kind !== 'resource') return;
     var ft = {};
     t.fields.forEach(function (f) {
@@ -1083,9 +1369,11 @@ function checkProgram(prog) {
   });
   Object.keys(variants).forEach(function (vn) {
     var vd = variants[vn];
+    curMod = vd.module || '';
     if (vd.ftypes) vd.ftypesT = vd.ftypes.map(function (r) { return resolve(r, vd.line); });
   });
-  prog.funcs.forEach(function (f) {
+  curMod = '';
+  each(prog.funcs, function (f) {
     f.paramT = f.params.map(function (p) { lowerName(p.name, 'Parameter', p.line); return resolve(p.tref, p.line); });
     f.retT = f.ret ? resolve(f.retRef, f.line) : T_DONE;
   });
@@ -1098,12 +1386,12 @@ function checkProgram(prog) {
     return checkable(t.base, t.line, (depth || 0) + 1);
   }
 
-  var report = { program: [], functions: [] };
+  var report = { program: [], functions: [], interrupts: [], forever: [], tests: [], modules: prog.modules || [] };
 
   function join(a, b) { if (a === 'secret' || b === 'secret') return 'secret'; if (a === 'unchecked' || b === 'unchecked') return 'unchecked'; return 'clean'; }
   function R(taint, fallible, lin, region, ref, type) { return { taint: taint || 'clean', fallible: fallible || null, lin: lin || null, region: region || null, ref: ref || null, type: type || null }; }
   function RT(type, taint) { return R(taint, null, null, null, null, type); }
-  function mkctx(fn, pure) { return { fn: fn, needed: [], reveals: pure ? null : [], pure: pure || null, lin: [], scopes: [[]], regions: [], loop: 0 }; }
+  function mkctx(fn, pure) { return { fn: fn, needed: [], reveals: pure ? null : [], pure: pure || null, lin: [], scopes: [[]], regions: [], loop: 0, forever: [] }; }
 
   function declare(env, ctx, name, p) {
     if (Object.prototype.hasOwnProperty.call(env, name)) err(p.line, 'Der Name ' + name + ' ist in diesem Block schon vergeben.');
@@ -1296,7 +1584,7 @@ function checkProgram(prog) {
           if (at.taint === 'unchecked') err(a.line || e.line, 'Ungeprüfter Wert darf nicht an ' + q + ' gehen. Erst mit check prüfen.');
           if (at.taint === 'secret' && !b.acceptsSecret) err(a.line || e.line, 'Ein Geheimnis darf nicht an ' + q + ' gehen.');
           if (at.lin) err(a.line || e.line, 'Eine Ressource kann nicht an ' + q + ' gehen.');
-          if (at.region && q === 'Db.insert') err(a.line || e.line, 'Ein Wert aus der Region ' + at.region + ' darf nicht gespeichert werden, er verschwindet am Blockende.');
+          if (at.region && q === 'File.append') err(a.line || e.line, 'Ein Wert aus der Region ' + at.region + ' darf nicht gespeichert werden, er verschwindet am Blockende.');
         });
         if (b.hw) {
           var addr = fold(e.args[0]);
@@ -1306,8 +1594,37 @@ function checkProgram(prog) {
           : b.r === 'Fill' ? T('Table', [argT[1] || null, e.args[0] ? fold(e.args[0]) : null]) : LIB[b.r];
         return R(b.ret, b.fallible || null, null, null, null, bt);
       }
+      case 'With': {
+        var wo = value(e.obj, env, ctx), wt = wo.type, wd = wt && !wt.a && types[wt.n], wtaint = wo.taint, wreg = wo.region, wok = !!(wd && wd.kind === 'record');
+        if (wo.taint === 'unchecked') err(e.line, 'Ungeprüfter Wert vor with. Erst mit check prüfen.');
+        else if (wt && !wok) err(e.line, wd && wd.kind === 'resource' ? 'with macht eine geänderte Kopie. Eine Ressource gibt es genau einmal, sie lässt sich nicht kopieren.'
+          : 'with braucht einen Datensatz, vorhanden ist ' + tstr(wt) + '.');
+        var wseen = {};
+        e.fields.forEach(function (fl) {
+          var at = value(fl.expr, env, ctx), ln = fl.expr.line || e.line;
+          if (wseen[fl.name]) err(ln, 'Das Feld ' + fl.name + ' steht doppelt hinter with.');
+          wseen[fl.name] = true;
+          if (at.taint === 'unchecked') err(ln, 'Ungeprüfter Wert im Feld ' + fl.name + '. Erst mit check prüfen.');
+          else if (wok) fits(fl.expr, at.type, fieldType(wt, fl.name, ln, true), ln, 'Das Feld ' + fl.name + ' von ' + wt.n);
+          if (at.lin) err(ln, 'Das Feld ' + fl.name + ' kann im Prototyp keine Ressource aufnehmen.');
+          if (at.taint === 'secret') wtaint = 'secret';
+          wreg = wreg || at.region;
+        });
+        return R(wtaint, null, null, wreg, null, wok ? wt : null);
+      }
+      case 'Old': {
+        if (!ctx.inEnsures) err(e.line, 'old(...) steht nur in ensures. Es ist der Wert vor dem Aufruf.');
+        var oo = value(e.e, ctx.oldEnv || env, ctx);
+        if (ctx.inEnsures && ctx.fn && ctx.fn.olds.indexOf(e) < 0) ctx.fn.olds.push(e);
+        return RT(oo.type, oo.taint);
+      }
       case 'Variant': {
         var vd = variants[e.name];
+        if (!vd && own(consts, e.name) && !e.args.length) {
+          e.isConst = true;
+          e.cv = consts[e.name].cv;
+          return RT(consts[e.name].type);
+        }
         if (!vd) {
           if (types[e.name] && types[e.name].kind !== 'refined') err(e.line, 'Ein Datensatz wird mit geschweiften Klammern gebaut: ' + e.name + ' { ... }');
           else err(e.line, 'Der Name ' + e.name + ' ist nicht bekannt.');
@@ -1423,7 +1740,7 @@ function checkProgram(prog) {
   function diverges(stmts) {
     var last = stmts[stmts.length - 1];
     if (!last) return false;
-    if (last.k === 'Return') return true;
+    if (last.k === 'Return' || last.k === 'Forever') return true;
     if (last.k === 'If') return !!last.els && diverges(last.then) && diverges(last.els);
     if (last.k === 'Match') return last.arms.length > 0 && last.arms.every(function (a) { return diverges(a.body); });
     if (last.k === 'Region') return diverges(last.body);
@@ -1439,21 +1756,60 @@ function checkProgram(prog) {
     var local = Object.create(env), mine = [];
     ctx.scopes.push(mine);
     if (pre) pre(local);
-    stmts.forEach(function (s) { stmt(s, local, ctx); });
+    stmts.forEach(function (s, i) {
+      stmt(s, local, ctx);
+      if (s.k === 'Forever' && i < stmts.length - 1) warn(stmts[i + 1].line, 'Diese Zeile wird nie erreicht: forever davor endet nicht.');
+    });
     var div = diverges(stmts);
     ctx.scopes.pop();
     closeScope(mine, div);
     return div;
   }
+  function letValue(s, env, ctx) {
+    var r = handled(s.e, s.other, env, ctx, s.line);
+    if (r.lin && s.e.k === 'Var' && r.ref) moveVar(r.ref, s.line, ctx);
+    return r;
+  }
+  function letDeclare(s, r, env, ctx) {
+    lowerName(s.name, 'Variablen', s.line);
+    var lty = r.type, ann = s.type ? resolve(s.type, s.line) : null;
+    if (ann) { fits(s.e, r.type, ann, s.line, 'Die Variable ' + s.name); lty = ann; }
+    declare(env, ctx, s.name, { taint: r.taint, mut: s.mut, lin: r.lin, own: true, canChange: s.mut, region: r.region, line: s.line, type: lty });
+  }
+  function pureCtx(ctx, what) {
+    var c = mkctx(ctx.fn, what);
+    c.regions = ctx.regions;
+    return c;
+  }
   function stmt(s, env, ctx) {
     switch (s.k) {
-      case 'Let': {
-        var r = handled(s.e, s.other, env, ctx, s.line);
-        if (r.lin && s.e.k === 'Var' && r.ref) moveVar(r.ref, s.line, ctx);
-        lowerName(s.name, 'Variablen', s.line);
-        var lty = r.type, ann = s.type ? resolve(s.type, s.line) : null;
-        if (ann) { fits(s.e, r.type, ann, s.line, 'Die Variable ' + s.name); lty = ann; }
-        declare(env, ctx, s.name, { taint: r.taint, mut: s.mut, lin: r.lin, own: true, canChange: s.mut, region: r.region, line: s.line, type: lty });
+      case 'Let': letDeclare(s, letValue(s, env, ctx), env, ctx); break;
+      case 'Together': {
+        need(ctx, { name: 'Tasks' }, s.line, 'together');
+        var results = s.lets.map(function (l) { return letValue(l, env, ctx); });
+        var use = s.lets.map(function (l) {
+          var u = { read: {}, write: {} };
+          (function walk(x, w) {
+            if (x.k === 'Var') { u.read[x.name] = true; if (w) u.write[x.name] = true; }
+            if (x.k === 'Mode') walk(x.e, true); else kids(x).forEach(function (c) { walk(c, false); });
+          })(l.e, false);
+          return u;
+        });
+        use.forEach(function (a, i) {
+          Object.keys(a.write).forEach(function (name) {
+            use.forEach(function (b, j) {
+              if (i !== j && b.read[name]) err(s.lets[Math.max(i, j)].line, name + ' wird in einer Zeile von together verändert oder abgegeben und in einer anderen benutzt. Gleichzeitige Zeilen teilen nichts, was sich ändert.');
+            });
+          });
+        });
+        s.lets.forEach(function (l, i) { letDeclare(l, results[i], env, ctx); });
+        break;
+      }
+      case 'Forever': {
+        ctx.loop++;
+        block(s.body, env, ctx);
+        ctx.loop--;
+        ctx.forever.push(s.line);
         break;
       }
       case 'Assign': {
@@ -1507,6 +1863,8 @@ function checkProgram(prog) {
         var dv = env[s.name];
         if (!dv) { err(s.line, 'Der Name ' + s.name + ' ist hier nicht bekannt.'); break; }
         if (!dv.lin) { err(s.line, 'destroy ist nur für Ressourcen gedacht. ' + s.name + ' ist keine.'); break; }
+        var home = types[dv.lin] ? types[dv.lin].module || '' : '';
+        if (ctx.fn && home !== (ctx.fn.module || '')) err(s.line, 'destroy geht nur in dem Modul, das die Ressource definiert. ' + dv.lin + ' gehört zu ' + home + '. Dort eine Funktion mit take aufrufen.');
         if (dv.state === 'moved') err(s.line, s.name + ' wurde in Zeile ' + dv.movedLine + ' abgegeben und ist hier nicht mehr vorhanden.');
         else moveVar(dv, s.line, ctx);
         break;
@@ -1565,7 +1923,15 @@ function checkProgram(prog) {
         else merge(base, branches, s.line);
         break;
       }
-      case 'While': cond(s.cond, env, ctx); ctx.loop++; block(s.body, env, ctx); ctx.loop--; break;
+      case 'While': {
+        cond(s.cond, env, ctx);
+        var lctx = pureCtx(ctx, 'invariant und decreases');
+        s.invariants.forEach(function (c) { expectT(value(c.expr, env, lctx), T_BOOL, c.line, 'invariant'); });
+        if (s.decreases) expectT(value(s.decreases.expr, env, lctx), T_INT, s.decreases.line, 'decreases');
+        else warn(s.line, 'Diese while-Schleife nennt kein decreases. Damit ist nicht gesagt, warum sie endet.');
+        ctx.loop++; block(s.body, env, ctx); ctx.loop--;
+        break;
+      }
       case 'For': {
         var it = value(s.e, env, ctx), itT = null;
         lowerName(s.name, 'Variablen', s.line);
@@ -1602,7 +1968,19 @@ function checkProgram(prog) {
     expectT(c, T_BOOL, e.line, 'Die Bedingung');
   }
 
-  prog.types.forEach(function (t) {
+  each(prog.consts, function (c) {
+    if (own(consts, c.name) || variants[c.name] || types[c.name] || enums[c.name] || BASE_TYPES.indexOf(c.name) >= 0 || GENERIC.indexOf(c.name) >= 0)
+      err(c.line, 'Der Name ' + c.name + ' ist schon vergeben.');
+    upperName(c.name, 'Konstanten', c.line);
+    var r = value(c.e, {}, mkctx(null, 'Konstanten'));
+    if (r.taint !== 'clean') err(c.line, 'Eine Konstante ist ein fester, offener Wert. Ungeprüfte Werte und Geheimnisse gehören nicht hinein.');
+    if (r.lin) err(c.line, 'Eine Ressource kann keine Konstante sein.');
+    var ty = r.type, ann = c.type ? resolve(c.type, c.line) : null;
+    if (ann) { fits(c.e, r.type, ann, c.line, 'Die Konstante ' + c.name); ty = ann; }
+    consts[c.name] = { type: ty, cv: constOf(c.e), line: c.line };
+  });
+
+  each(prog.types, function (t) {
     if (t.kind === 'refined') {
       if (BASE_TYPES.indexOf(t.base) < 0) checkable(t.base, t.line);
       if (t.where) {
@@ -1613,22 +1991,28 @@ function checkProgram(prog) {
     }
   });
 
-  prog.funcs.forEach(function (f) {
+  each(prog.funcs, function (f) {
     var env = {}, ctx = mkctx(f, null);
     f.params.forEach(function (p, i) {
       declare(env, ctx, p.name, { taint: p.taint, param: true, lin: isRes(p.type) ? p.type : null,
         own: p.mode === 'take', canChange: p.mode !== 'read', line: p.line, type: f.paramT[i] });
     });
     var cctx = mkctx(f, 'Verträge');
+    f.olds = [];
     f.requires.forEach(function (c) { expectT(value(c.expr, Object.create(env), cctx), T_BOOL, c.line, 'requires'); });
     var eenv = Object.create(env);
     eenv.result = { name: 'result', taint: f.retTaint, state: 'live', rdepth: 0, loopDepth: 0, type: f.retT };
+    cctx.inEnsures = true;
+    cctx.oldEnv = Object.create(env);
     f.ensures.forEach(function (c) { expectT(value(c.expr, eenv, cctx), T_BOOL, c.line, 'ensures'); });
-    if (f.assembly) {
-      if (!f.rights.some(function (d) { return d.name === 'Cpu'; })) err(f.line, 'Die assembly-Funktion ' + f.name + ' braucht uses Cpu.');
-      if (!f.assumes.length) err(f.line, 'Die assembly-Funktion ' + f.name + ' braucht mindestens eine Annahme (assumes), weil niemand ihren Inhalt prüft.');
-      report.functions.push({ name: f.name, line: f.line, assembly: true, rights: f.rights.map(fmtRight), changes: [], takes: [],
-        requires: f.requires.map(function (c) { return c.text; }), ensures: [], assumes: f.assumes.map(function (a) { return a.text; }), reveals: [] });
+    if (f.assembly || f.foreign) {
+      var kind = f.assembly ? 'assembly' : 'foreign';
+      if (f.assembly && !f.rights.some(function (d) { return d.name === 'Cpu'; })) err(f.line, 'Die assembly-Funktion ' + f.name + ' braucht uses Cpu.');
+      if (!f.assumes.length) err(f.line, 'Die ' + kind + '-Funktion ' + f.name + ' braucht mindestens eine Annahme (assumes), weil niemand ihren Inhalt prüft.');
+      report.functions.push({ name: f.name, line: f.line, module: f.module || '', assembly: f.assembly, foreign: f.foreign, handles: null, forever: [],
+        rights: f.rights.map(fmtRight), changes: [], takes: [],
+        requires: f.requires.map(function (c) { return c.text; }), ensures: f.foreign ? f.ensures.map(function (c) { return c.text; }) : [],
+        assumes: f.assumes.map(function (a) { return a.text; }), reveals: [] });
       return;
     }
     var div = block(f.body, env, ctx);
@@ -1644,11 +2028,15 @@ function checkProgram(prog) {
       if (n.lo !== null && sameKind.length) err(n.line, fmtRight(n) + ' (wegen ' + n.via + ') liegt außerhalb dessen, was ' + f.name + ' darf: ' + sameKind.map(fmtRight).join(', ') + '.');
       else err(n.line, f.name + ' braucht das Recht ' + fmtRight(n) + ' (wegen ' + n.via + '). Es fehlt in der uses-Zeile.');
     });
-    f.rights.forEach(function (d, i) {
-      if (!used[i]) warnings.push({ line: d.line, msg: f.name + ' verlangt ' + fmtRight(d) + ', nutzt es aber nicht. Rechte so knapp wie möglich halten.' });
+    if (f.name === 'main') mainUsed = used;
+    else f.rights.forEach(function (d, i) {
+      if (!used[i]) warn(d.line, f.name + ' verlangt ' + fmtRight(d) + ', nutzt es aber nicht. Rechte so knapp wie möglich halten.');
     });
+    ctx.forever.forEach(function (ln) { report.forever.push({ name: f.name, line: ln, module: f.module || '' }); });
+    if (f.handles) report.interrupts.push({ n: f.handles.n, name: f.name, module: f.module || '' });
     report.functions.push({
-      name: f.name, line: f.line, assembly: false, rights: f.rights.map(fmtRight),
+      name: f.name, line: f.line, module: f.module || '', assembly: false, foreign: false, handles: f.handles ? f.handles.n : null, forever: ctx.forever,
+      rights: f.rights.map(fmtRight),
       changes: f.params.filter(function (p) { return p.mode === 'change'; }).map(function (p) { return p.name + ': ' + p.type; }),
       takes: f.params.filter(function (p) { return p.mode === 'take'; }).map(function (p) { return p.name + ': ' + p.type; }),
       requires: f.requires.map(function (c) { return c.text; }),
@@ -1662,21 +2050,60 @@ function checkProgram(prog) {
   if (!main) err(1, 'Es fehlt der Einstieg: function main() { ... }');
   else {
     if (main.params.length) err(main.line, 'main hat im Prototyp keine Parameter.');
+    if (main.handles) err(main.line, 'main ist der Einstieg und behandelt keine Unterbrechung.');
     report.program = main.rights.map(fmtRight);
+    /* Die Rechte von main sind die Obergrenze des Programms. Das gilt auch für Funktionen, die niemand aufruft, weil die Hardware es tut. */
+    mainUsed = mainUsed || {};
+    Object.keys(handlers).forEach(function (hn) {
+      var h = handlers[hn];
+      curMod = h.module || '';
+      h.rights.forEach(function (r) {
+        var ok = false;
+        main.rights.forEach(function (d, i) { if (covers(d, r)) { mainUsed[i] = true; ok = true; } });
+        if (!ok) err(h.line, h.name + ' behandelt Interrupt(' + hn + ') und braucht ' + fmtRight(r) + '. main nennt dieses Recht nicht, seine Rechte sind die Obergrenze des Programms.');
+      });
+    });
+    curMod = '';
+    main.rights.forEach(function (d, i) {
+      if (!mainUsed[i]) warn(d.line, 'main verlangt ' + fmtRight(d) + ', nutzt es aber nicht. Rechte so knapp wie möglich halten.');
+    });
   }
+
+  /* Tests: reine Blöcke neben dem Code. Sie enden mit return und einem Wahrheitswert. */
+  var testNames = {};
+  each(prog.tests, function (t) {
+    var label = 'test "' + t.name + '"';
+    if (testNames[(t.module || '') + '|' + t.name]) err(t.line, 'Den Test "' + t.name + '" gibt es schon.');
+    testNames[(t.module || '') + '|' + t.name] = true;
+    var fn = { name: label, line: t.line, module: t.module || '', params: [], paramT: [], ret: 'Bool', retT: T_BOOL, retTaint: 'clean', errType: null,
+      rights: [], requires: [], ensures: [], assumes: [], olds: [], body: t.body, isTest: true };
+    var ctx = mkctx(fn, null);
+    var div = block(t.body, {}, ctx);
+    closeScope(ctx.scopes[0], div);
+    if (!div) err(t.line, 'Der Test "' + t.name + '" endet nicht mit return. Ein Test gibt einen Wahrheitswert zurück: true heißt bestanden.');
+    ctx.needed.forEach(function (n) { err(n.line, 'Tests sind rein und haben keine Rechte. ' + n.via + ' braucht ' + fmtRight(n) + '.'); });
+    t.fn = fn;
+    report.tests.push({ name: t.name, line: t.line, module: t.module || '' });
+  });
+
   /* Stehen schon Fehler im Programm, zählt nur ein eindeutiges Nein: Der Rest kann Folge der anderen Fehler sein. */
-  if (proofs.length) execute({ types: types, variants: variants, funcs: funcs }, '', proofs, errors.length > 0).forEach(function (x) { err(x.line, x.msg); });
-  errors.sort(function (a, b) { return a.line - b.line; });
-  return { errors: errors, warnings: warnings, report: report, types: types, variants: variants, funcs: funcs };
+  var info = { types: types, variants: variants, funcs: funcs, consts: prog.consts, tests: prog.tests, handlers: handlers };
+  if (proofs.length) execute(info, '', proofs, errors.length > 0).forEach(function (x) { curMod = x.module || ''; err(x.line, x.msg); });
+  curMod = '';
+  var byPlace = function (a, b) { return (a.module || '') < (b.module || '') ? -1 : (a.module || '') > (b.module || '') ? 1 : a.line - b.line; };
+  errors.sort(byPlace);
+  info.errors = errors; info.warnings = warnings; info.report = report;
+  return info;
 }
 
 /* ---------- Interpreter ---------- */
 function Err(v) { this.value = v; }
 function ReturnSignal(v) { this.value = v; }
 function RuntimeFail(msg, line) { this.message = msg; this.line = line || 0; }
+function HaltSignal(msg) { this.message = msg; }
 
 function parseWorld(text) {
-  var w = { input: {}, net: {}, port: {}, dbDown: {}, mailDown: false, keys: null };
+  var w = { input: {}, net: {}, port: {}, env: {}, foreign: {}, fileDown: {}, mailDown: false, keys: null, interrupts: null, rounds: 100 };
   (text || '').split('\n').forEach(function (raw) {
     var line = raw.trim();
     if (!line || line[0] === '#') return;
@@ -1690,7 +2117,11 @@ function parseWorld(text) {
         if (SCAN[c] !== undefined) { w.keys.push(SCAN[c]); w.keys.push(SCAN[c] + 0x80); }
       });
     }
-    else if ((m = /^db\s+(\S+)\s*=\s*down$/.exec(line))) w.dbDown[m[1]] = true;
+    else if ((m = /^file\s+(\S+)\s*=\s*down$/.exec(line))) w.fileDown[m[1]] = true;
+    else if ((m = /^env\s+(\S+)\s*=\s?(.*)$/.exec(line))) w.env[m[1]] = m[2];
+    else if ((m = /^foreign\s+(\S+)\s*=\s?(.*)$/.exec(line))) w.foreign[m[1]] = m[2];
+    else if ((m = /^interrupts\s*=\s*(.*)$/.exec(line))) w.interrupts = m[1].split(/[\s,]+/).filter(Boolean).map(Number).filter(function (n) { return n >= 0 && n <= 255; });
+    else if ((m = /^forever\s*=\s*(\d+)$/.exec(line))) w.rounds = Math.min(parseInt(m[1], 10), 10000);
     else if (/^mail\s*=\s*down$/.exec(line)) w.mailDown = true;
   });
   return w;
@@ -1740,7 +2171,32 @@ function hash(s) {
 
 function execute(info, worldText, proofs, lenient) {
   var world = parseWorld(worldText), out = [], tables = {}, steps = 0, depth = 0;
-  var mem = {}, serial = '', stack = [], memOther = 0, screenUsed = false;
+  var mem = {}, serial = '', stack = [], memOther = 0, screenUsed = false, globals = {};
+  var handlers = info.handlers || {}, irq = world.interrupts;
+  /* Nachbau: Jede Taste löst die Unterbrechung 33 aus (IRQ 1 der Tastatur), einmal beim Drücken, einmal beim Loslassen. */
+  if (!irq && world.keys && handlers[33]) irq = world.keys.map(function () { return 33; });
+  function snap(v) {
+    if (Array.isArray(v)) return v.map(snap);
+    if (isRecord(v)) { var f = {}; v.order.forEach(function (n) { f[n] = snap(v.f[n]); }); return { rec: v.rec, order: v.order, f: f }; }
+    return v;
+  }
+  function scalar(name) {
+    for (var d = 0; d < 25 && name; d++) {
+      if (BASE_TYPES.indexOf(name) >= 0) return name;
+      name = types[name] && types[name].kind === 'refined' ? types[name].base : null;
+    }
+    return null;
+  }
+  function bits(v, line) {
+    int(v, line);
+    if (v < 0) fail('Bits rechnet nur mit Zahlen ab 0, vorhanden ist ' + v + '.', line);
+    return BigInt(v);
+  }
+  function shift(v, line) {
+    int(v, line);
+    if (v < 0 || v > 62) fail('Verschoben wird um 0 bis 62 Stellen, vorhanden ist ' + v + '.', line);
+    return BigInt(v);
+  }
   function hw(name, addr, line) {
     if (typeof addr !== 'number') fail(name + ' erwartet eine Zahl als Adresse.', line);
     var f = stack[stack.length - 1];
@@ -1792,17 +2248,24 @@ function execute(info, worldText, proofs, lenient) {
     var q = e.mod + '.' + e.fn, line = e.line;
     switch (q) {
       case 'Console.print': out.push({ kind: 'out', text: show(args[0]) }); return DONE;
-      case 'Input.read': { var k = show(args[0]); return Object.prototype.hasOwnProperty.call(world.input, k) ? world.input[k] : ''; }
+      case 'Console.read': { var k = show(args[0]); return own(world.input, k) ? world.input[k] : ''; }
+      case 'Env.get': { var ek = show(args[0]); return own(world.env, ek) ? world.env[ek] : ''; }
+      case 'Bits.and': return Number(bits(args[0], line) & bits(args[1], line));
+      case 'Bits.or': return Number(bits(args[0], line) | bits(args[1], line));
+      case 'Bits.xor': return Number(bits(args[0], line) ^ bits(args[1], line));
+      case 'Bits.shift_left': return safe(Number(bits(args[0], line) << shift(args[1], line)), line);
+      case 'Bits.shift_right': return Number(bits(args[0], line) >> shift(args[1], line));
+      case 'Bits.test': return ((bits(args[0], line) >> shift(args[1], line)) & BigInt(1)) === BigInt(1);
       case 'Net.get': { var key = show(args[0]) + show(args[1]); out.push({ kind: 'net', text: 'Abruf ' + key }); return Object.prototype.hasOwnProperty.call(world.net, key) ? world.net[key] : ''; }
-      case 'Db.insert': {
+      case 'File.append': {
         var tn = args[0];
-        if (world.dbDown[tn]) return new Err(mkVariant('DbError', 'DbError', [], []));
+        if (world.fileDown[tn]) return new Err(mkVariant('FileError', 'FileError', [], []));
         (tables[tn] = tables[tn] || []).push(args[1]);
-        out.push({ kind: 'db', text: 'Tabelle ' + tn + ': gespeichert ' + show(args[1], true) });
+        out.push({ kind: 'file', text: tn + ': angehängt ' + show(args[1], true) });
         return tables[tn].length;
       }
-      case 'Db.exists': return (tables[args[0]] || []).some(function (r) { return isRecord(r) && deepEq(r.f[show(args[1])], args[2]); });
-      case 'Db.count': return (tables[args[0]] || []).length;
+      case 'File.find': return (tables[args[0]] || []).some(function (r) { return isRecord(r) && deepEq(r.f[show(args[1])], args[2]); });
+      case 'File.count': return (tables[args[0]] || []).length;
       case 'Mail.send':
         if (world.mailDown) return new Err(mkVariant('MailError', 'MailError', [], []));
         out.push({ kind: 'mail', text: 'Mail über ' + args[0] + ' an ' + show(args[1]) + ': ' + show(args[2]) + ' / ' + show(args[3]) });
@@ -1862,14 +2325,27 @@ function execute(info, worldText, proofs, lenient) {
     f.requires.forEach(function (c) {
       if (!bool(evalE(c.expr, env), c.line)) fail('Vertrag verletzt: ' + f.name + ' verlangt "' + c.text + '".', line);
     });
+    var olds = new Map();
+    (f.olds || []).forEach(function (o) { olds.set(o, snap(evalE(o.e, env))); });
     var result = DONE;
-    stack.push(f);
-    try { execBlock(f.body, env); }
-    catch (sig) { if (sig instanceof ReturnSignal) result = sig.value; else throw sig; }
-    stack.pop();
+    if (f.foreign) {
+      out.push({ kind: 'foreign', text: f.name + '(' + args.map(function (a) { return show(a, true); }).join(', ') + ')' });
+      if (f.ret && f.ret !== 'Done') {
+        var key = f.short || f.name, base = scalar(f.ret);
+        if (!base) fail('Der Prüfstand kann für die foreign-Funktion ' + f.name + ' nur Int, Text oder Bool nachbilden, nicht ' + f.ret + '.', line);
+        if (!own(world.foreign, key)) fail('Die foreign-Funktion ' + f.name + ' läuft im Prüfstand nicht wirklich. Ihr Ergebnis in der Außenwelt angeben: foreign ' + key + ' = wert', line);
+        result = convert(world.foreign[key], f.ret, line);
+        if (result === null) fail('Die Außenwelt liefert für ' + f.name + ' "' + world.foreign[key] + '", das ist kein ' + f.ret + '. Die Annahme der foreign-Funktion wäre verletzt.', line);
+      }
+    } else {
+      stack.push(f);
+      try { execBlock(f.body, env); }
+      catch (sig) { if (sig instanceof ReturnSignal) result = sig.value; else throw sig; }
+      stack.pop();
+    }
     if (!(result instanceof Err) && f.errType && isVariant(result) && result.enumName === f.errType) result = new Err(result);
     if (!(result instanceof Err)) {
-      var eenv = { vars: { result: result }, parent: env };
+      var eenv = { vars: { result: result, ' old': olds }, parent: env };
       f.ensures.forEach(function (c) {
         if (!bool(evalE(c.expr, eenv), c.line)) fail('Vertrag verletzt: ' + f.name + ' sichert "' + c.text + '" zu, das Ergebnis ' + show(result, true) + ' erfüllt es nicht.', c.line);
       });
@@ -1909,7 +2385,18 @@ function execute(info, worldText, proofs, lenient) {
         return call(f, e.args.map(function (a) { return evalE(a, env); }), e.line);
       }
       case 'MCall': return builtin(e, e.args.map(function (a) { return evalE(a, env); }));
+      case 'With': {
+        var wo = copyVal(evalE(e.obj, env), types);
+        if (!isRecord(wo)) fail('with braucht einen Datensatz, vorhanden ist ' + show(wo, true) + '.', e.line);
+        e.fields.forEach(function (fl) { wo.f[fl.name] = copyVal(evalE(fl.expr, env), types); });
+        return wo;
+      }
+      case 'Old': {
+        var oenv = lookup(env, ' old', e.line).vars[' old'];
+        return oenv.get(e);
+      }
       case 'Variant': {
+        if (e.isConst) return globals[e.name];
         if (e.name === 'Done') return DONE;
         var vd = variants[e.name];
         return mkVariant(e.name, vd.enumName, vd.fields, e.args.map(function (a) { return evalE(a, env); }));
@@ -1970,6 +2457,11 @@ function execute(info, worldText, proofs, lenient) {
     fail('Unbekannter Operator ' + op + '.', line);
   }
 
+  function deliver(n, line) {
+    var h = handlers[n];
+    if (!h) { out.push({ kind: 'irq', text: 'Unterbrechung ' + n + ': keine Funktion behandelt sie, verworfen' }); return; }
+    call(h, [], line);
+  }
   function execBlock(stmts, env) {
     var local = child(env);
     for (var i = 0; i < stmts.length; i++) exec(stmts[i], local);
@@ -2033,7 +2525,35 @@ function execute(info, worldText, proofs, lenient) {
         if (bool(evalE(s.cond, env), s.line)) execBlock(s.then, env);
         else if (s.els) execBlock(s.els, env);
         break;
-      case 'While': while (bool(evalE(s.cond, env), s.line)) { tick(s.line); execBlock(s.body, env); } break;
+      case 'While': {
+        var prev = null;
+        while (true) {
+          s.invariants.forEach(function (c) {
+            if (!bool(evalE(c.expr, env), c.line)) fail('invariant verletzt: "' + c.text + '" gilt hier nicht mehr.', c.line);
+          });
+          if (!bool(evalE(s.cond, env), s.line)) break;
+          if (s.decreases) {
+            var dv = int(evalE(s.decreases.expr, env), s.decreases.line);
+            if (dv < 0) fail('decreases "' + s.decreases.text + '" ist unter 0 gefallen (' + dv + ').', s.decreases.line);
+            if (prev !== null && dv >= prev) fail('decreases "' + s.decreases.text + '" ist nicht kleiner geworden (erst ' + prev + ', dann ' + dv + '). So endet die Schleife nicht.', s.decreases.line);
+            prev = dv;
+          }
+          tick(s.line);
+          execBlock(s.body, env);
+        }
+        break;
+      }
+      case 'Forever': {
+        for (var round = 0; ; round++) {
+          if (irq) {
+            if (!irq.length) throw new HaltSignal('Keine Unterbrechung mehr in der Außenwelt. Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + (round === 1 ? ' Durchlauf' : ' Durchläufen') + ' an.');
+            deliver(irq.shift(), s.line);
+          } else if (round >= world.rounds) throw new HaltSignal('Der Prüfstand hält forever in Zeile ' + s.line + ' nach ' + round + ' Durchläufen an. Echte Hardware liefe weiter.');
+          tick(s.line);
+          execBlock(s.body, env);
+        }
+      }
+      case 'Together': s.lets.forEach(function (l) { exec(l, env); }); break;
       case 'For': {
         var it = evalE(s.e, env), items;
         if (it && it.range) { items = []; if (it.range[1] - it.range[0] > 200000) fail('Der Bereich ist für den Prototyp zu groß.', s.line); for (var n = it.range[0]; n <= it.range[1]; n++) items.push(n); }
@@ -2046,7 +2566,18 @@ function execute(info, worldText, proofs, lenient) {
     }
   }
 
+  function initConsts() {
+    (info.consts || []).forEach(function (c) { globals[c.name] = evalE(c.e, { vars: {}, parent: null }); });
+  }
+  if (proofs) {
+    try { initConsts(); } catch (ex) { if (!lenient && !(ex instanceof RuntimeFail)) throw ex; }
+  }
   if (proofs) return proofs.map(function (p) {
+    var x = prove(p);
+    if (x && p.module) x.module = p.module;
+    return x;
+  }).filter(Boolean);
+  function prove(p) {
     var t = types[p.type], why = t.whereText ? ' (' + t.whereText.replace(/\s+/g, ' ') + ')' : '';
     steps = 0; depth = 0;
     try {
@@ -2058,19 +2589,42 @@ function execute(info, worldText, proofs, lenient) {
       if (ex instanceof RangeError) return { line: p.line, msg: 'Ob ' + show(p.v, true) + ' ein ' + p.type + ' ist, lässt sich nicht ausrechnen: zu tiefe Verschachtelung.' };
       throw ex;
     }
-  }).filter(Boolean);
-  var res = { output: out, runtimeError: null, mainResult: null, mainFailed: false, screen: null };
-  try {
+  }
+  var res = { output: out, runtimeError: null, mainResult: null, mainFailed: false, screen: null, tests: [], halted: null };
+  function guarded(run, where) {
+    try { run(); return null; }
+    catch (ex) {
+      var e = null;
+      if (ex instanceof RuntimeFail) e = { line: ex.line, msg: ex.message };
+      else if (ex instanceof HaltSignal) e = { line: 0, msg: ex.message, halt: true };
+      else if (ex instanceof RangeError) e = { line: 0, msg: 'Zu tiefe Verschachtelung von Aufrufen.' };
+      else throw ex;
+      var top = stack[stack.length - 1] || where;
+      if (top && top.module) e.module = top.module;
+      stack.length = 0; depth = 0;
+      return e;
+    }
+  }
+  var bad = guarded(initConsts, null);
+  if (bad) { bad.msg = 'Eine Konstante lässt sich nicht ausrechnen: ' + bad.msg; res.runtimeError = bad; return res; }
+  (info.tests || []).forEach(function (t) {
+    steps = 0;
+    var ok = false;
+    var e = guarded(function () { ok = call(t.fn, [], t.line) === true; }, t.fn);
+    res.tests.push({ name: t.name, line: t.line, module: t.module || '', ok: ok && !e, msg: e ? e.msg : (ok ? '' : 'Der Test gab false zurück.') });
+  });
+  steps = 0;
+  var failed = guarded(function () {
     var r = call(funcs.main, [], funcs.main.line);
     if (r instanceof Err) { res.mainFailed = true; res.mainResult = show(r.value, true); }
     else if (r !== DONE) res.mainResult = show(r, true);
-  } catch (ex) {
-    if (ex instanceof RuntimeFail) res.runtimeError = { line: ex.line, msg: ex.message };
-    else if (ex instanceof RangeError) res.runtimeError = { line: 0, msg: 'Zu tiefe Verschachtelung von Aufrufen.' };
-    else throw ex;
-  }
+  }, funcs.main);
+  if (failed && failed.halt) res.halted = failed.msg;
+  else if (failed) res.runtimeError = failed;
+  else if (irq && irq.length) out.push({ kind: 'irq', text: irq.length + (irq.length === 1 ? ' Unterbrechung' : ' Unterbrechungen') + ' nicht zugestellt: Das Programm endete, ohne in forever zu warten.' });
   if (serial) out.push({ kind: 'serial', text: serial });
   if (memOther) out.push({ kind: 'mem', text: memOther + (memOther === 1 ? ' Byte' : ' Bytes') + ' außerhalb des Bildschirmspeichers geschrieben' });
+  if (res.halted) out.push({ kind: 'halt', text: res.halted });
   if (screenUsed) {
     var rows = [];
     for (var r = 0; r < VGA_ROWS; r++) {
@@ -2087,15 +2641,18 @@ function execute(info, worldText, proofs, lenient) {
   return res;
 }
 
-function run(src, worldText) {
-  var result = { errors: [], warnings: [], report: null, output: [], runtimeError: null, mainResult: null, mainFailed: false, ran: false, screen: null };
+/* modules: weitere Dateien als { Modulname: Quelltext }. Jede Datei ist ein Modul. */
+function run(src, worldText, modules) {
+  var result = { errors: [], warnings: [], report: null, output: [], runtimeError: null, mainResult: null, mainFailed: false, ran: false, screen: null, tests: [], halted: null };
   var prog;
-  try { prog = new Parser(lex(src), src).parseProgram(); }
+  try { prog = parseSource(src); }
   catch (ex) {
     if (ex instanceof LatchError) { result.errors.push({ line: ex.line, msg: ex.message }); return result; }
     throw ex;
   }
-  var info = checkProgram(prog);
+  var linked = linkProgram(prog, modules);
+  if (linked.errors.length) { result.errors = linked.errors; return result; }
+  var info = checkProgram(linked.prog);
   result.errors = info.errors;
   result.warnings = info.warnings;
   result.report = info.report;
@@ -2107,6 +2664,8 @@ function run(src, worldText) {
   result.mainResult = ex2.mainResult;
   result.mainFailed = ex2.mainFailed;
   result.screen = ex2.screen;
+  result.tests = ex2.tests;
+  result.halted = ex2.halted;
   return result;
 }
 
@@ -2151,7 +2710,8 @@ root.Latch = { run: run };
     '',
     'function alloc(change pool: Pool)',
     '    -> Page fails MemError',
-    '    ensures pool.free >= 0',
+    '    ensures pool.free',
+    '        == old(pool.free) - 1',
     '{',
     '    if pool.free == 0 {',
     '        return OutOfMemory',
@@ -2164,7 +2724,8 @@ root.Latch = { run: run };
     '',
     'function free(change pool: Pool,',
     '              take page: Page)',
-    '    ensures pool.free >= 1',
+    '    ensures pool.free',
+    '        == old(pool.free) + 1',
     '{',
     '    pool.free = pool.free + 1',
     '    destroy page',
@@ -2176,36 +2737,36 @@ root.Latch = { run: run };
       'latch 1', '', TYPES, '',
       'function parse()',
       '    -> Signup fails SignupError',
-      '    uses Input',
+      '    uses Console',
       '{',
-      '    let name = check Input.read("name")',
-      '        as Name',
+      '    let name = check',
+      '        Console.read("name") as Name',
       '        otherwise return BadInput("name")',
-      '    let email = check Input.read("email")',
-      '        as Email',
+      '    let email = check',
+      '        Console.read("email") as Email',
       '        otherwise return BadInput("email")',
-      '    let age = check Input.read("age")',
-      '        as Age',
+      '    let age = check',
+      '        Console.read("age") as Age',
       '        otherwise return BadInput("age")',
       '    return Signup { name, email, age }',
       '}',
       '',
       'function store(s: Signup)',
       '    -> Int fails SignupError',
-      '    uses Db("accounts")',
+      '    uses File("accounts.db")',
       '    ensures result >= 1',
       '{',
-      '    if Db.exists("accounts",',
+      '    if File.find("accounts.db",',
       '                 "email", s.email) {',
       '        return Taken',
       '    }',
-      '    return Db.insert("accounts", s)',
+      '    return File.append("accounts.db", s)',
       '        otherwise return Unavailable',
       '}',
       '',
       'function main()',
       '    -> Int fails SignupError',
-      '    uses Input, Db("accounts"),',
+      '    uses File("accounts.db"),',
       '         Net("smtp.x.com"), Console',
       '{',
       '    let s = parse() otherwise as e {',
@@ -2502,8 +3063,14 @@ root.Latch = { run: run };
       '        task("uhr", 1),',
       '    ]',
       '    var next = pick(tasks, 2)',
-      '    while next >= 0 {',
+      '    // 2 + 3 + 1 Zeitscheiben:',
+      '    var todo = 6',
+      '    while next >= 0',
+      '        invariant todo >= 0',
+      '        decreases todo',
+      '    {',
       '        step(change tasks, next)',
+      '        todo = todo - 1',
       '        next = pick(tasks, next)',
       '    }',
       '    log("alle Aufgaben fertig")',
@@ -2547,6 +3114,233 @@ root.Latch = { run: run };
       '    }',
       '}'
     ].join('\n') },
+    { title: 'Modul: Bildschirm in eigener Datei', world: '', code: [
+      'latch 1',
+      'import Screen',
+      '',
+      'function main()',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '{',
+      '    var cur = Screen.start()',
+      '    Screen.print(change cur, "Latch OS")',
+      '',
+      '    // with: geänderte Kopie',
+      '    cur = cur with { row: 2, col: 4 }',
+      '    Screen.print(change cur, "aus Modul")',
+      '',
+      '    // cell ist dort nicht public,',
+      '    // das hier lehnt der Prüfer ab:',
+      '    // let at = Screen.cell(cur)',
+      '}'
+    ].join('\n'), modules: {
+      Screen: [
+      'latch 1',
+      '',
+      'public const WIDTH = 80',
+      'public const HEIGHT = 25',
+      'const VGA = 0xB8000',
+      '',
+      'public type Cursor = {',
+      '    row: Int,',
+      '    col: Int,',
+      '}',
+      '',
+      'public function start() -> Cursor',
+      '    ensures result.row == 0',
+      '    ensures result.col == 0',
+      '{',
+      '    return Cursor { row: 0, col: 0 }',
+      '}',
+      '',
+      '// Nicht public: nur hier sichtbar',
+      'function cell(cur: Cursor) -> Int',
+      '    requires cur.row in 0..HEIGHT - 1',
+      '    requires cur.col in 0..WIDTH - 1',
+      '{',
+      '    return VGA',
+      '        + (cur.row * WIDTH + cur.col) * 2',
+      '}',
+      '',
+      'public function put(change cur: Cursor,',
+      '                    ch: Int)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '    requires ch in 0..255',
+      '    ensures cur.col in 0..WIDTH - 1',
+      '{',
+      '    Memory.write(cell(cur), ch)',
+      '    Memory.write(cell(cur) + 1, 0x0F)',
+      '    cur.col = cur.col + 1',
+      '    if cur.col == WIDTH {',
+      '        cur.col = 0',
+      '        cur.row = cur.row + 1',
+      '    }',
+      '    if cur.row == HEIGHT { cur.row = 0 }',
+      '}',
+      '',
+      'public function print(change cur: Cursor,',
+      '                      msg: Text)',
+      '    uses Memory(0xB8000..0xB8F9F)',
+      '    ensures cur.row in 0..HEIGHT - 1',
+      '{',
+      '    for b in Text.bytes(msg) {',
+      '        put(change cur, b)',
+      '    }',
+      '}',
+      '',
+      'test "erste Zelle" {',
+      '    let c = Cursor { row: 0, col: 0 }',
+      '    return cell(c) == VGA',
+      '}',
+      '',
+      'test "zweite Zeile" {',
+      '    let c = Cursor { row: 1, col: 0 }',
+      '    return cell(c) == VGA + 160',
+      '}'
+      ].join('\n')
+    } },
+    { title: 'Kern: Unterbrechung und forever', world: 'keys = latch', code: [
+      'latch 1',
+      '',
+      'type Byte = Int where it in 0..255',
+      '',
+      'const DATA = 0x60',
+      'const COM1 = 0x3F8',
+      '',
+      '// Die Tastatur meldet sich selbst,',
+      '// niemand ruft on_key auf.',
+      'function on_key()',
+      '    handles Interrupt(33)',
+      '    uses Port(0x60), Port(0x3F8)',
+      '    assumes "PS/2 data port at 0x60"',
+      '{',
+      '    let code = check Port.read(DATA)',
+      '        as Byte',
+      '        otherwise return Done',
+      '    // Bit 7 gesetzt: Taste losgelassen',
+      '    if Bits.test(code, 7) { return }',
+      '    for b in Text.bytes("{code} ") {',
+      '        Port.write(COM1, b)',
+      '    }',
+      '}',
+      '',
+      'function main()',
+      '    uses Port(0x60), Port(0x3F8)',
+      '{',
+      '    for b in Text.bytes("bereit") {',
+      '        Port.write(COM1, b)',
+      '    }',
+      '    Port.write(COM1, 10)',
+      '    // Der Kern wartet für immer:',
+      '    forever { }',
+      '}'
+    ].join('\n') },
+    { title: 'Verträge: old, invariant, test', world: '', code: [
+      'latch 1',
+      '',
+      'type Account = {',
+      '    owner: Text,',
+      '    balance: Int,',
+      '}',
+      '',
+      'function deposit(change a: Account,',
+      '                 amount: Int)',
+      '    requires amount > 0',
+      '    ensures a.balance',
+      '        == old(a.balance) + amount',
+      '{',
+      '    a.balance = a.balance + amount',
+      '}',
+      '',
+      '// 5 Prozent Zinsen je Jahr',
+      'function grow(start: Int, years: Int)',
+      '    -> Int',
+      '    requires start >= 0',
+      '    requires years >= 0',
+      '    ensures result >= start',
+      '{',
+      '    var sum = start',
+      '    var left = years',
+      '    while left > 0',
+      '        invariant sum >= start',
+      '        decreases left',
+      '    {',
+      '        sum = sum + sum * 5 / 100',
+      '        left = left - 1',
+      '    }',
+      '    return sum',
+      '}',
+      '',
+      'test "zwei Jahre" {',
+      '    return grow(1000, 2) == 1102',
+      '}',
+      '',
+      'test "with ändert nur die Kopie" {',
+      '    let a = Account {',
+      '        owner: "Ada", balance: 10 }',
+      '    let b = a with { balance: 99 }',
+      '    return a.balance == 10',
+      '        and b.balance == 99',
+      '}',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    var a = Account {',
+      '        owner: "Ada", balance: 1000 }',
+      '    deposit(change a, 500)',
+      '    Console.print(grow(a.balance, 3))',
+      '}'
+    ].join('\n') },
+    { title: 'Gleichzeitig: together', world: 'net api.weather.com/v1/berlin = 7\nnet api.weather.com/v1/dresden = 3', code: [
+      'latch 1',
+      '',
+      'type Celsius = Int',
+      '    where it in -90..60',
+      '',
+      'function weather(city: Text)',
+      '    -> unchecked Text',
+      '    uses Net("api.weather.com")',
+      '{',
+      '    return Net.get("api.weather.com",',
+      '                   "/v1/" + city)',
+      '}',
+      '',
+      'function main()',
+      '    uses Net("api.weather.com"),',
+      '         Tasks, Console',
+      '{',
+      '    // Beide Abrufe laufen zugleich:',
+      '    together {',
+      '        let a = weather("berlin")',
+      '        let b = weather("dresden")',
+      '    }',
+      '    let berlin = check a as Celsius',
+      '        otherwise return Done',
+      '    let dresden = check b as Celsius',
+      '        otherwise return Done',
+      '    Console.print(',
+      '        "Abstand: {berlin - dresden}")',
+      '}'
+    ].join('\n') },
+    { title: 'Fremder Code: foreign', world: 'foreign c_strlen = 5', code: [
+      'latch 1',
+      '',
+      'type Len = Int where it in 0..4096',
+      '',
+      '// Fremder Code hat keinen Rumpf.',
+      '// Niemand prüft seinen Inhalt,',
+      '// dafür steht jemand ein:',
+      'foreign function c_strlen(s: Text)',
+      '    -> Len',
+      '    assumes "strlen from libc"',
+      '',
+      'function main()',
+      '    uses Console',
+      '{',
+      '    let n = c_strlen("hallo")',
+      '    Console.print("Länge {n}")',
+      '}'
+    ].join('\n') },
     { title: 'Fehler: Recht fehlt', world: '', code: [
       'latch 1', '',
       '// add soll nur rechnen.',
@@ -2571,9 +3365,9 @@ root.Latch = { run: run };
       '    where it in 0..150',
       '',
       'function main()',
-      '    uses Input, Console',
+      '    uses Console',
       '{',
-      '    let raw = Input.read("age")',
+      '    let raw = Console.read("age")',
       '',
       '    // Beides lehnt der Prüfer ab:',
       '    if raw == "36" {',
@@ -2732,9 +3526,43 @@ root.Latch = { run: run };
     var span = gutter.children[line - 1];
     if (span && span.scrollIntoView) span.scrollIntoView({ block: 'center' });
   }
+  var modBox = $('modules');
+  function stale() { marks = { err: {}, warn: {} }; layout(); setStatus('', 'Geändert, noch nicht geprüft'); }
+  function addModule(name, text) {
+    var wrap = el('div', 'modwrap'), head = el('div', 'modhead'), ta = el('textarea', 'modfile'), rm = el('button', 'plain', 'Entfernen');
+    wrap.setAttribute('data-name', name);
+    head.appendChild(el('span', 'fn-name', name));
+    rm.type = 'button';
+    rm.addEventListener('click', function () { modBox.removeChild(wrap); stale(); });
+    head.appendChild(rm);
+    ta.value = text;
+    ta.rows = Math.max(3, text.split('\n').length);
+    ta.spellcheck = false;
+    ta.setAttribute('autocapitalize', 'off'); ta.setAttribute('autocomplete', 'off'); ta.setAttribute('autocorrect', 'off'); ta.setAttribute('wrap', 'off');
+    ta.setAttribute('aria-label', 'Latch-Code des Moduls ' + name);
+    ta.addEventListener('input', function () { ta.rows = Math.max(3, ta.value.split('\n').length); stale(); });
+    wrap.appendChild(head); wrap.appendChild(ta);
+    modBox.appendChild(wrap);
+  }
+  function modules() {
+    var m = {};
+    Array.prototype.forEach.call(modBox.children, function (w) { m[w.getAttribute('data-name')] = w.lastChild.value; });
+    return m;
+  }
+  $('modadd').addEventListener('click', function () {
+    var name = $('modname').value.trim(), hint = $('modhint');
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) { hint.textContent = 'Modulnamen beginnen mit einem Großbuchstaben und bestehen aus Buchstaben, Ziffern und _.'; return; }
+    if (Object.prototype.hasOwnProperty.call(modules(), name)) { hint.textContent = 'Die Datei ' + name + ' gibt es schon.'; return; }
+    hint.textContent = '';
+    $('modname').value = '';
+    addModule(name, 'latch 1\n\n');
+    stale();
+  });
+
   function msgItem(m, cls) {
     var li = el('li', cls);
-    if (m.line) {
+    if (m.module) li.appendChild(el('strong', '', 'Modul ' + m.module + (m.line ? ', Zeile ' + m.line + ': ' : ': ')));
+    else if (m.line) {
       var b = el('button', '', 'Zeile ' + m.line);
       b.type = 'button';
       b.addEventListener('click', function () { gotoLine(m.line); });
@@ -2750,13 +3578,14 @@ root.Latch = { run: run };
     s.lastChild.textContent = text;
   }
 
-  var KIND = { out: 'Konsole', net: 'Netz', db: 'Daten', mail: 'Mail', serial: 'Seriell', port: 'Port', mem: 'Speicher', asm: 'Assembler' };
+  var KIND = { out: 'Konsole', net: 'Netz', file: 'Datei', mail: 'Mail', serial: 'Seriell', port: 'Port', mem: 'Speicher', asm: 'Assembler', foreign: 'Fremd', irq: 'Unterbr.', halt: 'Prüfstand' };
 
   function render(r) {
     marks = { err: {}, warn: {} };
-    r.errors.forEach(function (e) { marks.err[e.line] = true; });
-    r.warnings.forEach(function (w) { marks.warn[w.line] = true; });
-    if (r.runtimeError && r.runtimeError.line) marks.err[r.runtimeError.line] = true;
+    r.errors.forEach(function (e) { if (!e.module) marks.err[e.line] = true; });
+    r.warnings.forEach(function (w) { if (!w.module) marks.warn[w.line] = true; });
+    if (r.runtimeError && r.runtimeError.line && !r.runtimeError.module) marks.err[r.runtimeError.line] = true;
+    var tests = r.tests || [], lost = tests.filter(function (t) { return !t.ok; }).length;
     layout();
 
     var check = $('check'), out = $('output'), rep = $('report');
@@ -2784,13 +3613,21 @@ root.Latch = { run: run };
       head.className = 'status warn';
       label.textContent = 'Geprüft. main endete mit dem Fehlerwert ' + r.mainResult;
       setStatus('warn', 'Fehlerwert ' + r.mainResult);
+    } else if (lost) {
+      head.className = 'status warn';
+      label.textContent = 'Geprüft und gelaufen, aber ' + (lost === 1 ? '1 Test ist' : lost + ' Tests sind') + ' gescheitert';
+      setStatus('warn', lost === 1 ? '1 Test gescheitert' : lost + ' Tests gescheitert');
     } else {
       head.className = 'status ok';
-      label.textContent = 'Geprüft und ohne Fehler gelaufen';
-      setStatus('ok', 'Gelaufen');
-      if (!r.warnings.length) list.appendChild(msgItem({ line: 0, msg: 'Rechte, ungeprüfte Daten, Geheimnisse und Fehlerfälle sind in Ordnung.' }, 'good'));
+      label.textContent = r.halted ? 'Geprüft und gelaufen, bis der Prüfstand forever angehalten hat' : 'Geprüft und ohne Fehler gelaufen';
+      setStatus('ok', r.halted ? 'Gelaufen, forever angehalten' : 'Gelaufen');
+      if (!r.warnings.length) list.appendChild(msgItem({ line: 0, msg: 'Rechte, Typen, ungeprüfte Daten, Geheimnisse und Fehlerfälle sind in Ordnung.' }, 'good'));
     }
     r.warnings.forEach(function (w) { list.appendChild(msgItem(w, 'warn')); });
+    tests.forEach(function (t) {
+      var where = t.module ? ' (Modul ' + t.module + ')' : '';
+      list.appendChild(msgItem({ line: t.module ? 0 : t.line, msg: (t.ok ? 'Test bestanden: ' : 'Test gescheitert: ') + t.name + where + (t.ok ? '' : '. ' + t.msg) }, t.ok ? 'test' : 'test failed'));
+    });
     if (list.firstChild) check.appendChild(list);
 
     $('screen-panel').hidden = !r.screen;
@@ -2816,14 +3653,28 @@ root.Latch = { run: run };
     if (r.report.program.length) r.report.program.forEach(function (x) { chips.appendChild(el('span', 'chip', x)); });
     else chips.appendChild(el('span', 'chip pure', 'nichts nach außen'));
     rep.appendChild(chips);
+    function section(title, items) {
+      if (!items.length) return;
+      rep.appendChild(el('p', 'sub', title));
+      var box = el('div', 'chips');
+      items.forEach(function (x) { box.appendChild(el('span', 'chip', x)); });
+      rep.appendChild(box);
+    }
+    section('Module', r.report.modules || []);
+    section('Unterbrechungen', (r.report.interrupts || []).map(function (i) { return 'Interrupt(' + i.n + ') → ' + i.name; }));
+    section('Endlosschleifen', (r.report.forever || []).map(function (f) { return f.name + ', Zeile ' + f.line; }));
+    section('Tests', (r.report.tests || []).map(function (t) { return (t.module ? t.module + ': ' : '') + t.name; }));
     rep.appendChild(el('p', 'sub', 'Funktionen'));
     r.report.functions.forEach(function (f) {
       var d = el('div', 'fn');
       var top = el('div', 'chips');
       top.appendChild(el('span', 'fn-name', f.name));
       if (f.assembly) top.appendChild(el('span', 'chip asm', 'Assembler, ungeprüft'));
+      if (f.foreign) top.appendChild(el('span', 'chip asm', 'fremder Code, ungeprüft'));
+      if (f.handles !== null && f.handles !== undefined) top.appendChild(el('span', 'chip asm', 'behandelt Interrupt(' + f.handles + ')'));
+      if (f.forever && f.forever.length) top.appendChild(el('span', 'chip asm', 'endet nie (forever)'));
       if (f.rights.length) f.rights.forEach(function (x) { top.appendChild(el('span', 'chip', x)); });
-      else if (!f.assembly) top.appendChild(el('span', 'chip pure', 'rein'));
+      else if (!f.assembly && !f.foreign) top.appendChild(el('span', 'chip pure', 'rein'));
       d.appendChild(top);
       var dl = el('dl');
       function row(k, v) { dl.appendChild(el('dt', '', k)); dl.appendChild(el('dd', '', v)); }
@@ -2841,7 +3692,7 @@ root.Latch = { run: run };
 
   function run(scroll) {
     var r;
-    try { r = window.Latch.run(code.value, world.value); }
+    try { r = window.Latch.run(code.value, world.value, modules()); }
     catch (e) {
       r = { errors: [{ line: 0, msg: 'Interner Fehler des Prototyps: ' + (e && e.message ? e.message : e) }], warnings: [], report: null, output: [], ran: false, runtimeError: null, mainResult: null, mainFailed: false };
     }
@@ -2862,10 +3713,13 @@ root.Latch = { run: run };
     world.value = EXAMPLES[i].world;
     world.rows = Math.max(3, world.value.split('\n').length + 1);
     if (EXAMPLES[i].world) $('world-panel').open = true;
+    clear(modBox);
+    Object.keys(EXAMPLES[i].modules || {}).forEach(function (name) { addModule(name, EXAMPLES[i].modules[name]); });
+    $('modules-panel').open = !!modBox.firstChild;
     run(false);
   }
   select.addEventListener('change', function () { load(parseInt(select.value, 10)); });
-  code.addEventListener('input', function () { marks = { err: {}, warn: {} }; layout(); setStatus('', 'Geändert, noch nicht geprüft'); });
+  code.addEventListener('input', stale);
   $('run').addEventListener('click', function () { run(true); });
   load(0);
 })();

@@ -1,6 +1,6 @@
 const { Latch } = require('../src/latch.js');
 const cases = [];
-function t(name, src, world, expect) { cases.push({ name, src, world, expect }); }
+function t(name, src, world, expect, mods) { cases.push({ name, src, world, expect, mods }); }
 
 const TYPES = `latch 1
 
@@ -23,32 +23,32 @@ enum SignupError {
 const SIGNUP = TYPES + `
 function parse()
     -> Signup fails SignupError
-    uses Input
+    uses Console
 {
-    let name = check Input.read("name") as Name
+    let name = check Console.read("name") as Name
         otherwise return BadInput("name")
-    let email = check Input.read("email") as Email
+    let email = check Console.read("email") as Email
         otherwise return BadInput("email")
-    let age = check Input.read("age") as Age
+    let age = check Console.read("age") as Age
         otherwise return BadInput("age")
     return Signup { name, email, age }
 }
 
 function store(s: Signup)
     -> Int fails SignupError
-    uses Db("accounts")
+    uses File("accounts.db")
     ensures result >= 1
 {
-    if Db.exists("accounts", "email", s.email) {
+    if File.find("accounts.db", "email", s.email) {
         return Taken
     }
-    return Db.insert("accounts", s)
+    return File.append("accounts.db", s)
         otherwise return Unavailable
 }
 
 function main()
     -> Int fails SignupError
-    uses Input, Db("accounts"), Net("smtp.x.com"), Console
+    uses File("accounts.db"), Net("smtp.x.com"), Console
 {
     let s  = try parse()
     let id = try store(s)
@@ -61,28 +61,28 @@ function main()
 const W = 'input name = Ada\ninput email = ada@example.org\ninput age = 36\n';
 t('signup ok', SIGNUP, W, r => r.errors.length === 0 && !r.runtimeError && r.mainResult === '1' && r.output.length === 3);
 t('signup bad age', SIGNUP, W.replace('36', '900'), r => r.mainFailed && r.mainResult === 'BadInput(field: "age")');
-t('signup db down', SIGNUP, W + 'db accounts = down', r => r.mainFailed && r.mainResult === 'Unavailable');
+t('signup db down', SIGNUP, W + 'file accounts.db = down', r => r.mainFailed && r.mainResult === 'Unavailable');
 t('signup mail down', SIGNUP, W + 'mail = down', r => r.mainFailed && r.mainResult === 'Unavailable');
-t('missing right', SIGNUP.replace('uses Input, Db("accounts"), Net("smtp.x.com"), Console', 'uses Input, Db("accounts"), Console'),
+t('missing right', SIGNUP.replace('uses File("accounts.db"), Net("smtp.x.com"), Console', 'uses File("accounts.db"), Console'),
   W, r => r.errors.length === 1 && /Net\("smtp.x.com"\)/.test(r.errors[0].msg));
 t('wrong host', SIGNUP.replace('Mail.send("smtp.x.com"', 'Mail.send("evil.example"'), W, r => r.errors.some(e => /evil.example/.test(e.msg)) && r.warnings.length === 1);
 t('unchecked to db', TYPES + `
-function main() uses Input, Db("accounts") {
-    let raw = Input.read("age")
-    Db.insert("accounts", raw) otherwise return Done
-}`, W, r => r.errors.some(e => /Ungeprüfter Wert darf nicht an Db.insert/.test(e.msg)));
+function main() uses Console, File("accounts.db") {
+    let raw = Console.read("age")
+    File.append("accounts.db", raw) otherwise return Done
+}`, W, r => r.errors.some(e => /Ungeprüfter Wert darf nicht an File.append/.test(e.msg)));
 t('unchecked in if', TYPES + `
-function main() uses Input, Console {
-    let raw = Input.read("age")
+function main() uses Console {
+    let raw = Console.read("age")
     if raw == "36" { Console.print("x") }
 }`, W, r => r.errors.length >= 1 && /Ungeprüft/.test(r.errors[0].msg));
 t('unhandled check', TYPES + `
-function main() uses Input {
-    let age = check Input.read("age") as Age
+function main() uses Console {
+    let age = check Console.read("age") as Age
 }`, W, r => r.errors.length === 1 && /Fehlerfall nicht behandelt/.test(r.errors[0].msg));
 t('else instead of otherwise', TYPES + `
-function main() uses Input {
-    let age = check Input.read("age") as Age
+function main() uses Console {
+    let age = check Console.read("age") as Age
         else return Done
 }`, W, r => r.errors.length === 1 && /otherwise/.test(r.errors[0].msg));
 t('secret print', `latch 1
@@ -146,12 +146,12 @@ function main() -> Done fails WeatherError uses Net("api.weather.com") {
     return Done
 }`, '', r => r.mainFailed && r.mainResult === 'NoData');
 t('return unchecked undeclared', `latch 1
-function f() -> Text uses Input { return Input.read("a") }
-function main() uses Input { let x = f() }`, '', r => r.errors.length === 1 && /ungeprüften Wert zurück/.test(r.errors[0].msg));
+function f() -> Text uses Console { return Console.read("a") }
+function main() uses Console { let x = f() }`, '', r => r.errors.length === 1 && /ungeprüften Wert zurück/.test(r.errors[0].msg));
 t('try mismatch', `latch 1
 enum E { A }
-function main() -> Int fails E uses Input {
-    let n = try check Input.read("n") as Int
+function main() -> Int fails E uses Console {
+    let n = try check Console.read("n") as Int
     return n
 }`, 'input n = 5', r => r.errors.length === 1 && /CheckFailed/.test(r.errors[0].msg));
 t('loops', `latch 1
@@ -183,7 +183,7 @@ t('infinite loop', `latch 1
 function main() { while true { } }`, '', r => /200.000 Schritten/.test(r.runtimeError.msg));
 t('no main / bad header', `function main() {}`, '', r => r.errors.length === 1 && /latch 1/.test(r.errors[0].msg));
 t('not yet', `latch 1
-function main() { together { } }`, '', r => /noch nicht unterstützt/.test(r.errors[0].msg));
+function main() { break }`, '', r => /noch nicht unterstützt/.test(r.errors[0].msg));
 t('unused right warning', `latch 1
 function main() uses Clock, Console { Console.print("hi") }`, '', r => r.errors.length === 0 && r.warnings.length === 1 && /Clock/.test(r.warnings[0].msg));
 t('header order', `latch 1
@@ -369,11 +369,11 @@ t('old or in signature', `latch 1
 enum E { A }
 function main() -> Int or E { return 1 }`, '', r => r.errors.length === 1 && /fails/.test(r.errors[0].msg));
 t('otherwise as', TYPES + `
-function parse() -> Age fails SignupError uses Input {
-    let age = check Input.read("age") as Age otherwise return BadInput("age")
+function parse() -> Age fails SignupError uses Console {
+    let age = check Console.read("age") as Age otherwise return BadInput("age")
     return age
 }
-function main() -> Int fails SignupError uses Input, Console {
+function main() -> Int fails SignupError uses Console {
     let age = parse() otherwise as e {
         match e {
             BadInput(field) -> { Console.print("Feld {field}") }
@@ -385,8 +385,8 @@ function main() -> Int fails SignupError uses Input, Console {
     return age
 }`, 'input age = 999', r => r.errors.length === 0 && r.output[0].text === 'Feld age' && r.mainFailed && r.mainResult === 'BadInput(field: "age")');
 t('otherwise as must return', TYPES + `
-function main() uses Input, Console {
-    let age = check Input.read("age") as Age otherwise as e {
+function main() uses Console {
+    let age = check Console.read("age") as Age otherwise as e {
         Console.print("x")
     }
 }`, '', r => r.errors.length === 1 && /muss mit return enden/.test(r.errors[0].msg));
@@ -520,9 +520,9 @@ t('table store needs var', `latch 1
 function main() { let xs = [1, 2]
  xs[0] = 5 }`, '', r => r.errors.length === 1 && /xs darf hier nicht verändert werden/.test(r.errors[0].msg));
 t('table index taint', `latch 1
-function main() uses Input, Console {
+function main() uses Console {
     let xs = [1, 2]
-    let raw = Input.read("i")
+    let raw = Console.read("i")
     Console.print(xs[raw])
     let k = secret 1
     Console.print(xs[k])
@@ -530,8 +530,9 @@ function main() uses Input, Console {
 
 t('reserved new words', `latch 1
 function main() { let old = 1 }`, '', r => r.errors.length === 1 && /Schlüsselwort/.test(r.errors[0].msg));
-t('forever not yet', `latch 1
-function main() { forever { } }`, '', r => r.errors.length === 1 && /noch nicht unterstützt/.test(r.errors[0].msg));
+t('hardened not yet', `latch 1
+hardened type X = Int
+function main() { }`, '', r => r.errors.length === 1 && /noch nicht unterstützt/.test(r.errors[0].msg));
 
 /* ---------- Typprüfung ---------- */
 const one = (r, re) => r.errors.length === 1 && re.test(r.errors[0].msg);
@@ -594,23 +595,23 @@ function f() -> Int fails E { return Worse }
 function main() { let x = f() otherwise return Done }`, '', r => one(r, /Die Rückgabe von f erwartet Int, vorhanden ist F/));
 t('type: otherwise as binds the error type', AGE + `
 enum E { Bad }
-function f() -> Int fails E uses Input {
-    let a = check Input.read("a") as Age otherwise as e {
+function f() -> Int fails E uses Console {
+    let a = check Console.read("a") as Age otherwise as e {
         return e
     }
     return a
 }
-function main() uses Input { let x = f() otherwise return Done }`, '', r => one(r, /Die Rückgabe von f erwartet Int, vorhanden ist CheckFailed/));
+function main() uses Console { let x = f() otherwise return Done }`, '', r => one(r, /Die Rückgabe von f erwartet Int, vorhanden ist CheckFailed/));
 t('refined: only check or a constant makes one', AGE + `
 function show(a: Age) uses Console { Console.print("Alter {a}") }
-function main() uses Console, Input {
+function main() uses Console {
     let n = 30 + Clock.now() * 0
     show(n)
 }`, '', r => r.errors.some(e => /show\(a\) erwartet Age, vorhanden ist Int\. Ein Wert vom Typ Age entsteht nur durch Prüfen: check wert as Age/.test(e.msg)));
 t('refined: checked value and constant pass', AGE + `
 function show(a: Age) uses Console { Console.print("Alter {a}") }
-function main() uses Console, Input {
-    let a = check Input.read("age") as Age otherwise return Done
+function main() uses Console {
+    let a = check Console.read("age") as Age otherwise return Done
     show(a)
     show(36)
     let b: Age = 100 + 50
@@ -621,15 +622,15 @@ function show(a: Age) uses Console { Console.print("Alter {a}") }
 function main() uses Console { show(200) }`, '', r => one(r, /200 erfüllt die Einschränkung von Age nicht \(it in 0\.\.150\)/) && r.errors[0].line === 7 && !r.ran);
 t('refined: widens to its base, never back', AGE + `
 function twice(n: Int) -> Int { return n * 2 }
-function main() uses Console, Input {
-    var a = check Input.read("age") as Age otherwise return Done
+function main() uses Console {
+    var a = check Console.read("age") as Age otherwise return Done
     Console.print(twice(a))
     a = a + 1
 }`, 'input age = 7', r => one(r, /Die Variable a erwartet Age, vorhanden ist Int/));
 t('refined: two types over Text are not interchangeable', AGE + `
 function mail(to: Email) uses Console { Console.print(to) }
-function main() uses Console, Input {
-    let n = check Input.read("name") as Name otherwise return Done
+function main() uses Console {
+    let n = check Console.read("name") as Name otherwise return Done
     mail(n)
 }`, '', r => one(r, /mail\(to\) erwartet Email, vorhanden ist Name\. Ein Wert vom Typ Email entsteht nur durch Prüfen/));
 t('refined: constant text is proven too', AGE + `
@@ -756,8 +757,8 @@ type List = { n: Int }
 enum Done { Fertig }
 function main() { }`, '', r => r.errors.length === 2 && /Der Typ List ist schon vergeben/.test(r.errors[0].msg) && /Der Name Done ist schon vergeben/.test(r.errors[1].msg));
 t('type: unchecked keeps its declared type', `latch 1
-function raw() -> unchecked Int uses Input { return Input.read("n") }
-function main() uses Input { let x = raw() }`, '', r => one(r, /Die Rückgabe von raw erwartet Int, vorhanden ist Text/));
+function raw() -> unchecked Int uses Console { return Console.read("n") }
+function main() uses Console { let x = raw() }`, '', r => one(r, /Die Rückgabe von raw erwartet Int, vorhanden ist Text/));
 t('type: secret keeps its type', `latch 1
 function f(k: secret Text) -> Text { return Crypto.encrypt(k, "x") }
 function main() uses Console {
@@ -765,10 +766,406 @@ function main() uses Console {
     Console.print(f(pin))
 }`, '', r => one(r, /f\(k\) erwartet Text, vorhanden ist Int/));
 
+/* ---------- Aufgabe 2: entschiedene Sprachteile ---------- */
+const texts = r => r.output.map(o => o.text).join();
+t('rights: fixed catalog', `latch 1
+function f() uses Db("accounts") { }
+function main() uses Input { }`, '', r => r.errors.length === 2 && r.errors.every(e => /gibt es nicht\. Der Katalog ist fest: Net, File, Clock/.test(e.msg)));
+t('rights: env and file', `latch 1
+type Port = Int where it in 1..65535
+function main() uses Env, File("log.txt"), Console {
+    let port = check Env.get("PORT") as Port otherwise return Done
+    let n = File.append("log.txt", "port {port}") otherwise return Done
+    Console.print("{n} {File.count("log.txt")}")
+}`, 'env PORT = 8080', r => clean(r) && r.output[1].text === '1 1' && r.output[0].kind === 'file');
+t('result and error type must differ', `latch 1
+enum E { A, B }
+function f() -> E fails E { return A }
+function main() { }`, '', r => one(r, /Ergebnis und Fehlertyp von f sind derselbe Typ \(E\)/));
+
+t('forever: halts in the test bench, listed in report', `latch 1
+function main() uses Console {
+    var n = 0
+    forever {
+        n = n + 1
+        Console.print("Runde {n}")
+    }
+}`, 'forever = 3', r => clean(r) && r.output.length === 4 && r.output[2].text === 'Runde 3' && /nach 3 Durchläufen/.test(r.halted)
+  && r.report.forever.length === 1 && r.report.forever[0].name === 'main' && r.report.functions[0].forever[0] === 4);
+t('forever: return leaves it, no return needed after it', `latch 1
+function wait(limit: Int) -> Int {
+    var n = 0
+    forever {
+        n = n + 1
+        if n == limit { return n }
+    }
+}
+function main() uses Console { Console.print(wait(7)) }`, '', r => clean(r) && r.output[0].text === '7' && r.halted === null);
+t('forever: code behind it is never reached', `latch 1
+function main() uses Console {
+    forever { }
+    Console.print("nie")
+}`, '', r => r.errors.length === 0 && r.warnings.some(w => /wird nie erreicht/.test(w.msg) && w.line === 4));
+
+t('while: invariant and decreases hold', `latch 1
+function sum(n: Int) -> Int requires n >= 0 {
+    var i = 0
+    var total = 0
+    while i < n
+        invariant total >= 0
+        invariant i <= n
+        decreases n - i
+    {
+        i = i + 1
+        total = total + i
+    }
+    return total
+}
+function main() uses Console { Console.print(sum(4)) }`, '', r => clean(r) && r.warnings.length === 0 && r.output[0].text === '10');
+t('while: decreases must shrink', `latch 1
+function main() {
+    var i = 0
+    while i < 3 decreases 3 - i { i = i + 0 }
+}`, '', r => r.errors.length === 0 && /decreases "3 - i" ist nicht kleiner geworden \(erst 3, dann 3\)/.test(r.runtimeError.msg));
+t('while: invariant is checked every round', `latch 1
+function main() {
+    var i = 0
+    while i < 5 invariant i < 3 decreases 5 - i { i = i + 1 }
+}`, '', r => r.errors.length === 0 && /invariant verletzt: "i < 3"/.test(r.runtimeError.msg));
+t('while: missing decreases is a warning', `latch 1
+function main() {
+    var i = 0
+    while i < 3 { i = i + 1 }
+}`, '', r => clean(r) && r.warnings.length === 1 && /kein decreases/.test(r.warnings[0].msg));
+t('while: clause types, order and purity', `latch 1
+function main() uses Clock {
+    var i = 0
+    while i < 3 invariant i decreases i < 3 { i = i + 1 }
+    while i < 9 invariant Clock.now() > 0 decreases 9 - i { i = i + 1 }
+}`, '', r => r.errors.length === 3 && /invariant erwartet Bool/.test(r.errors[0].msg) && /decreases erwartet Int/.test(r.errors[1].msg) && /invariant und decreases dürfen nichts nach außen tun/.test(r.errors[2].msg));
+t('while: decreases before invariant', `latch 1
+function main() { var i = 0
+ while i < 3 decreases 3 - i invariant i >= 0 { i = i + 1 } }`, '', r => one(r, /erst invariant, dann decreases/));
+
+const OLD = `latch 1
+type Pool = { next: Int, free: Int }
+function take_one(change pool: Pool)
+    requires pool.free > 0
+    ensures pool.free == old(pool.free) - 1
+    ensures pool.next == old(pool.next) + 1
+{
+    pool.free = pool.free - 1
+    pool.next = pool.next + STEP
+}
+`;
+t('old: value before the call', 'latch 1\nconst STEP = 1' + OLD.slice(7) + `function main() uses Console {
+    var pool = Pool { next: 0, free: 2 }
+    take_one(change pool)
+    take_one(change pool)
+    Console.print("{pool.next} {pool.free}")
+}`, '', r => clean(r) && r.output[0].text === '2 0' && /old\(pool\.free\) - 1/.test(r.report.functions[0].ensures[0]));
+t('old: broken promise is caught', 'latch 1\nconst STEP = 2' + OLD.slice(7) + `function main() {
+    var pool = Pool { next: 0, free: 2 }
+    take_one(change pool)
+}`, '', r => r.errors.length === 0 && /sichert "pool\.next == old\(pool\.next\) \+ 1" zu/.test(r.runtimeError.msg));
+t('old: only in ensures', `latch 1
+function f(n: Int) -> Int requires old(n) > 0 { return old(n) }
+function main() { let x = f(1) }`, '', r => one(r, /old\(\.\.\.\) steht nur in ensures/));
+
+t('const: fixed values, usable in hardware addresses', `latch 1
+const VGA = 0xB8000
+const LAST = VGA + 0xF9F
+const GREETING = "Latch"
+function main() uses Memory(0xB8000..0xB8F9F), Console {
+    Memory.write(VGA, 76)
+    Memory.write(LAST, 33)
+    Console.print("{GREETING} {LAST - VGA}")
+}`, '', r => clean(r) && r.output[0].text === 'Latch 3999' && r.screen[0].charAt(0) === 'L');
+t('const: address outside the right is found before running', `latch 1
+const VGA = 0xB8000
+const LAST = VGA + 0xF9F
+function main() uses Memory(0xB8000..0xB8F9F) { Memory.write(LAST + 1, 65) }`, '', r => one(r, /Memory\(0xB8FA0\).*liegt außerhalb/));
+t('const: rules', AGE + `
+const max_age = 150
+const OLDEST: Age = 200
+const RAW = Console.read("x")
+const KEY = Kem.generate()
+const OLDEST = 3
+function main() { let x = LATER }
+const LATER = 1`, '', r => r.errors.length === 6 && has(r, /Konstanten beginnen mit einem Großbuchstaben: Max_age statt max_age/) && has(r, /200 erfüllt die Einschränkung von Age nicht/)
+  && has(r, /Konstanten dürfen nichts nach außen tun/) && has(r, /Ungeprüfte Werte und Geheimnisse gehören nicht hinein/) && has(r, /Der Name OLDEST ist schon vergeben/));
+t('const: typed and used as proof', AGE + `
+const ADULT: Age = 18
+function show(a: Age) uses Console { Console.print("ab {a}") }
+function main() uses Console { show(ADULT) }`, '', r => clean(r) && r.output[0].text === 'ab 18');
+
+t('test: blocks run and report', `latch 1
+function double(n: Int) -> Int { return n * 2 }
+test "double works" { return double(4) == 8 }
+test "double is wrong on purpose" { return double(4) == 9 }
+test "contract breaks" {
+    let xs = [1, 2]
+    return xs[5] == 0
+}
+function main() uses Console { Console.print("main") }`, '', r => clean(r) && r.output[0].text === 'main' && r.tests.length === 3 && r.tests[0].ok && !r.tests[1].ok && /false/.test(r.tests[1].msg)
+  && !r.tests[2].ok && /Stelle 5/.test(r.tests[2].msg) && r.report.tests.length === 3);
+t('test: pure, ends with a Bool', `latch 1
+test "prints" {
+    Console.print("x")
+    return true
+}
+test "no result" { let a = 1 }
+test "wrong type" { return 5 }
+test "prints" { return true }
+function main() { }`, '', r => r.errors.length === 4 && has(r, /Tests sind rein und haben keine Rechte\. Console\.print braucht Console/) && has(r, /Der Test "no result" endet nicht mit return/)
+  && has(r, /Die Rückgabe von test "wrong type" erwartet Bool, vorhanden ist Int/) && has(r, /Den Test "prints" gibt es schon/));
+
+t('with: changed copy', `latch 1
+type Cursor = { row: Int, col: Int }
+function main() uses Console {
+    let a = Cursor { row: 1, col: 2 }
+    let b = a with { col: 9 }
+    let c = (b with { row: a.row + 1 }).row
+    Console.print("{a.col} {b.row} {b.col} {c}")
+}`, '', r => clean(r) && r.output[0].text === '2 1 9 2');
+t('with: rules', `latch 1
+type Cursor = { row: Int, col: Int }
+resource Page { frame: Int }
+function main() {
+    let a = Cursor { row: 1, col: 2 }
+    let b = a with { col: "x" }
+    let c = a with { depth: 1 }
+    let d = 5 with { col: 1 }
+    let p = Page { frame: 1 }
+    let q = p with { frame: 2 }
+    destroy p
+    destroy q
+}`, '', r => has(r, /Das Feld col von Cursor erwartet Int, vorhanden ist Text/) && has(r, /Cursor hat kein Feld depth/) && has(r, /with braucht einen Datensatz, vorhanden ist Int/)
+  && has(r, /Eine Ressource gibt es genau einmal/));
+
+t('foreign: no body, assumed, in the report', `latch 1
+type Len = Int where it in 0..4096
+foreign function c_strlen(s: Text) -> Len
+    uses Process
+    requires s.length > 0
+    assumes "strlen from libc, text is NUL-terminated"
+foreign function c_beep() uses Process assumes "beeps"
+function main() uses Process, Console {
+    c_beep()
+    Console.print(c_strlen("hallo") + 1)
+}`, 'foreign c_strlen = 5', r => clean(r) && r.output.map(o => o.kind + ':' + o.text).join('|') === 'foreign:c_beep()|foreign:c_strlen("hallo")|out:6'
+  && r.report.functions[0].foreign === true && r.report.functions[0].assumes.length === 1);
+t('foreign: the bench needs a value, and it must fit', `latch 1
+type Len = Int where it in 0..4096
+foreign function c_strlen(s: Text) -> Len assumes "strlen from libc"
+function main() uses Console { Console.print(c_strlen("hallo")) }`, 'foreign c_strlen = 99999', r => r.errors.length === 0 && /"99999", das ist kein Len/.test(r.runtimeError.msg));
+t('foreign: missing value', `latch 1
+foreign function c_time() -> Int assumes "time from libc"
+function main() uses Console { Console.print(c_time()) }`, '', r => /foreign c_time = wert/.test(r.runtimeError.msg));
+t('foreign: rules', `latch 1
+foreign function a() uses Process
+foreign function b() assumes "x" { }
+function main() { }`, '', r => one(r, /keinen Latch-Rumpf/));
+t('foreign: needs assumes, caller needs its rights', `latch 1
+foreign function a() uses Process
+function main() { a() }`, '', r => r.errors.length === 2 && has(r, /Die foreign-Funktion a braucht mindestens eine Annahme/) && has(r, /main braucht das Recht Process/));
+
+const IRQ = `latch 1
+type Byte = Int where it in 0..255
+function on_key()
+    handles Interrupt(33)
+    uses Port(0x60), Port(0x3F8)
+{
+    let code = check Port.read(0x60) as Byte otherwise return Done
+    if code < 128 { Port.write(0x3F8, 48 + code % 10) }
+}
+`;
+t('interrupt: keys fire the handler while main waits', IRQ + `
+function main() uses Port(0x60), Port(0x3F8) {
+    forever { }
+}`, 'keys = ab', r => clean(r) && r.output[0].kind === 'serial' && r.output[0].text === '08' && /Keine Unterbrechung mehr/.test(r.halted) && r.warnings.length === 0
+  && r.report.interrupts.length === 1 && r.report.interrupts[0].n === 33 && r.report.functions[0].handles === 33);
+t('interrupt: main is the ceiling', IRQ + `
+function main() uses Port(0x3F8) { forever { } }`, '', r => one(r, /on_key behandelt Interrupt\(33\) und braucht Port\(0x60\)\. main nennt dieses Recht nicht/));
+t('interrupt: unknown number, none delivered without forever', IRQ + `
+function main() uses Port(0x60), Port(0x3F8) { }`, 'interrupts = 7 33', r => clean(r) && /2 Unterbrechungen nicht zugestellt/.test(r.output[0].text));
+t('interrupt: no handler', `latch 1
+function main() { forever { } }`, 'interrupts = 7', r => clean(r) && /Unterbrechung 7: keine Funktion behandelt sie/.test(r.output[0].text));
+t('interrupt: rules', `latch 1
+function a(n: Int) -> Int handles Interrupt(32) { return n }
+function b() handles Interrupt(32) { }
+function c() handles Interrupt(300) { }
+function main() { }`, '', r => r.errors.length === 4 && has(r, /hat deshalb keine Parameter/) && has(r, /gibt deshalb nichts zurück/) && has(r, /Interrupt\(32\) wird schon von a behandelt/) && has(r, /Nummern 0 bis 255/));
+t('interrupt: handles comes before uses', `latch 1
+function a() uses Cpu handles Interrupt(32) { }
+function main() { }`, '', r => one(r, /Reihenfolge im Funktionskopf ist fest: handles, uses/));
+
+const TOG = `latch 1
+type Celsius = Int where it in -90..60
+function weather(city: Text) -> unchecked Text uses Net("api.weather.com") {
+    return Net.get("api.weather.com", "/v1/" + city)
+}
+`;
+t('together: needs Tasks, names live on afterwards', TOG + `
+function main() uses Net("api.weather.com"), Tasks, Console {
+    together {
+        let a = weather("berlin")
+        let b = weather("dresden")
+    }
+    let ta = check a as Celsius otherwise return Done
+    let tb = check b as Celsius otherwise return Done
+    Console.print(ta + tb)
+}`, 'net api.weather.com/v1/berlin = 3\nnet api.weather.com/v1/dresden = 4', r => clean(r) && r.output[2].text === '7');
+t('together: missing right', TOG + `
+function main() uses Net("api.weather.com") {
+    together { let a = weather("berlin") }
+}`, '', r => one(r, /main braucht das Recht Tasks \(wegen together\)/));
+t('together: lines do not see or disturb each other', `latch 1
+type Pool = { free: Int }
+function grab(change pool: Pool) -> Int { pool.free = pool.free - 1
+ return pool.free }
+function main() uses Tasks {
+    var pool = Pool { free: 2 }
+    together {
+        let a = grab(change pool)
+        let b = grab(change pool)
+    }
+    together {
+        let c = 1
+        let d = c + 1
+    }
+}`, '', r => r.errors.length === 2 && /pool wird in einer Zeile von together verändert/.test(r.errors[0].msg) && /Der Name c ist hier nicht bekannt/.test(r.errors[1].msg));
+t('together: only let lines', `latch 1
+function main() uses Tasks { together { var a = 1 } }`, '', r => one(r, /In together steht in jeder Zeile ein let/));
+
+t('bits: library', `latch 1
+function main() uses Console {
+    Console.print("{Bits.and(12, 10)} {Bits.or(12, 10)} {Bits.xor(12, 10)}")
+    Console.print("{Bits.shift_left(1, 10)} {Bits.shift_right(1024, 3)}")
+    Console.print("{Bits.test(5, 0)} {Bits.test(5, 1)} {Bits.and(0xFFFFFFFFFF, 0xFF00000000)}")
+    Console.print(Bits.shift_left(1, 60))
+}`, '', r => r.errors.length === 0 && texts(r) === '8 14 6,1024 128,true false 1095216660480' && /Zahlenüberlauf/.test(r.runtimeError.msg));
+t('bits: no negative numbers, typed', `latch 1
+function main() uses Console {
+    if Bits.test(1, 0) { Console.print(Bits.and(0 - 1, 1)) }
+}`, '', r => r.errors.length === 0 && /Bits rechnet nur mit Zahlen ab 0/.test(r.runtimeError.msg));
+t('bits: arguments are Int', `latch 1
+function main() { let a = Bits.and("x", 1) + 1
+ let b = not Bits.test(1, 1) }`, '', r => one(r, /Bits\.and \(Argument 1\) erwartet Int/));
+
+/* ---------- Module ---------- */
+const SCREEN = `latch 1
+public type Cursor = { row: Int, col: Int }
+public enum Color { White, Red(level: Int) }
+public const WIDTH = 80
+const HEIGHT = 25
+public resource Lock { id: Int }
+
+public function start() -> Cursor
+    ensures result.row == 0
+{
+    return Cursor { row: 0, col: 0 }
+}
+public function put(change cur: Cursor, ch: Int)
+    uses Memory(0xB8000..0xB8F9F)
+    requires cur.col < WIDTH
+    requires cur.row < HEIGHT
+{
+    Memory.write(cell(cur), ch)
+    cur.col = cur.col + 1
+}
+function cell(cur: Cursor) -> Int { return 0xB8000 + (cur.row * WIDTH + cur.col) * 2 }
+public function lock() -> Lock ensures result.id == 1 { return Lock { id: 1 } }
+public function unlock(take l: Lock) requires l.id == 1 { destroy l }
+public function attr(c: Color) -> Int ensures result > 0 {
+    match c {
+        White -> return 15
+        Red(level) -> return 4 + level
+    }
+}
+test "cell of the origin" { return cell(Cursor { row: 0, col: 0 }) == 0xB8000 }
+`;
+t('module: import, public function, type, const, enum', `latch 1
+import Screen
+function main() uses Memory(0xB8000..0xB8F9F), Console {
+    var cur = Screen.start()
+    Screen.put(change cur, 72)
+    Screen.put(change cur, 105)
+    let next: Screen.Cursor = Screen.Cursor { row: 1, col: Screen.WIDTH - 1 }
+    Console.print("{cur.col} {next.col} {Screen.attr(Screen.Red(2))}")
+    let c = Screen.White
+    match c {
+        Screen.White -> Console.print("weiss")
+        Screen.Red(level) -> Console.print(level)
+    }
+    let l = Screen.lock()
+    Screen.unlock(take l)
+}`, '', r => clean(r) && r.screen[0] === 'Hi' && texts(r) === '2 79 6,weiss' && r.tests.length === 1 && r.tests[0].ok && r.tests[0].module === 'Screen'
+  && r.report.modules.join() === 'Screen' && r.report.functions.some(f => f.name === 'Screen.put' && f.module === 'Screen'), { Screen: SCREEN });
+t('module: private things stay inside', `latch 1
+import Screen
+function main() uses Console {
+    let cur = Screen.start()
+    Console.print(Screen.cell(cur))
+    Console.print(Screen.HEIGHT)
+    Console.print(Screen.nothing())
+}`, '', r => r.errors.length === 3 && /cell ist in Screen nicht public/.test(r.errors[0].msg) && /HEIGHT ist in Screen nicht public/.test(r.errors[1].msg)
+  && /Das Modul Screen hat nichts mit dem Namen nothing/.test(r.errors[2].msg), { Screen: SCREEN });
+t('module: must be imported and exist', `latch 1
+import Disk
+function main() { let cur = Screen.start() }`, '', r => r.errors.length === 2 && /Das Modul Disk ist nicht vorhanden/.test(r.errors[0].msg) && /Screen ist hier nicht importiert/.test(r.errors[1].msg), { Screen: SCREEN });
+t('module: use without import', `latch 1
+function main() { let cur = Screen.start() }`, '', r => one(r, /Das Modul Screen ist hier nicht importiert\. Am Dateianfang ergänzen: import Screen/), { Screen: SCREEN });
+t('module: rights travel across the border', `latch 1
+import Screen
+function main() {
+    var cur = Screen.start()
+    Screen.put(change cur, 72)
+}`, '', r => one(r, /main braucht das Recht Memory\(0xB8000\.\.0xB8F9F\) \(wegen Aufruf von Screen\.put\)/), { Screen: SCREEN });
+t('module: destroy only at home', `latch 1
+import Screen
+function main() {
+    let l = Screen.lock()
+    destroy l
+}`, '', r => one(r, /destroy geht nur in dem Modul, das die Ressource definiert\. Screen\.Lock gehört zu Screen/), { Screen: SCREEN });
+t('module: public function needs a contract, errors name the module', `latch 1
+import Util
+function main() uses Console { Console.print(Util.twice(2)) }`, '', r => r.errors.length === 2 && r.errors.every(e => e.module === 'Util')
+  && /Die öffentliche Funktion Util\.twice braucht einen Vertrag/.test(r.errors[0].msg) && /Die Rückgabe von Util\.broken erwartet Int, vorhanden ist Text/.test(r.errors[1].msg) && r.errors[1].line === 3,
+  { Util: 'latch 1\npublic function twice(n: Int) -> Int { return n * 2 }\nfunction broken() -> Int { return "x" }' });
+t('module: runtime errors name the module they happen in', `latch 1
+import Util
+function main() uses Console {
+    Console.print(Util.third([1, 2, 3]))
+    Console.print(Util.third([1, 2]))
+}`, '', r => r.errors.length === 0 && r.output[0].text === '3' && /Stelle 2 liegt außerhalb/.test(r.runtimeError.msg) && r.runtimeError.module === 'Util' && r.runtimeError.line === 2,
+  { Util: 'latch 1\npublic function third(xs: List<Int>) -> Int requires xs.length >= 0 { return xs[2] }' });
+t('module: syntax error inside a module', `latch 1
+import Util
+function main() { }`, '', r => r.errors.length === 1 && r.errors[0].module === 'Util' && r.errors[0].line === 2, { Util: 'latch 1\nfunction (' });
+t('module: modules import each other, same names do not clash', `latch 1
+import Kbd
+function put() -> Int { return 1 }
+function main() uses Console { Console.print("{put()} {Kbd.decode(30)}") }`, '', r => clean(r) && r.output[0].text === '1 31', {
+  Kbd: 'latch 1\nimport Table2\npublic function decode(code: Int) -> Int requires code >= 0 { return put(code) }\nfunction put(n: Int) -> Int { return Table2.next(n) }',
+  Table2: 'latch 1\npublic function next(n: Int) -> Int ensures result == n + 1 { return n + 1 }' });
+t('module: import rules', `latch 1
+import screen
+import Console
+function main() { }
+import Late`, '', r => r.errors.length === 1 && /import steht am Dateianfang/.test(r.errors[0].msg));
+t('module: lower case and library names', `latch 1
+import screen
+import Console
+function main() { }`, '', r => r.errors.length === 2 && /Modulnamen beginnen mit einem Großbuchstaben: import Screen/.test(r.errors[0].msg) && /Console gehört zur Bibliothek/.test(r.errors[1].msg));
+t('public: only before declarations', `latch 1
+public test "x" { return true }
+function main() { }`, '', r => one(r, /Nach public folgt type, enum, resource, const oder function/));
+
 let failed = 0;
 for (const c of cases) {
   let r, ok = false, ex = null;
-  try { r = Latch.run(c.src, c.world); ok = !!c.expect(r); } catch (e) { ex = e; }
+  try { r = Latch.run(c.src, c.world, c.mods); ok = !!c.expect(r); } catch (e) { ex = e; }
   if (!ok) {
     failed++;
     console.log('FAIL', c.name);

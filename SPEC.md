@@ -93,7 +93,7 @@ Jede Zeile im Block läuft gleichzeitig, danach stehen die Namen zur Verfügung.
 - Fremder Code: `foreign function name(...) uses ... assumes "..."` ohne Rumpf, im Bericht als ungeprüft.
 - Katalog der Rechte ist fest: `Net`, `File`, `Clock`, `Random`, `Env`, `Process`, `Console`, `Memory`,
   `Port`, `Cpu`, `Tasks`, `Interrupt`. Pakete definieren keine eigenen Rechte.
-  `Db` und `Input` im Prüfstand sind Platzhalter.
+  Der Prüfstand lehnt jedes andere Recht ab.
 - Programmstart: Die Rechte von `main` sind die Obergrenze. Das Programm meldet sie beim Start an das
   Betriebssystem (OpenBSD: pledge/unveil; eigenes OS: direkt), als zweites Netz neben dem Compiler.
 - Typisierte Texte, fester Satz: `sql"..."`, `html"..."`, `shell"..."`, `url"..."`, `path"..."`.
@@ -111,16 +111,14 @@ Jede Zeile im Block läuft gleichzeitig, danach stehen die Namen zur Verfügung.
 - `change` verlangt genau denselben Typ, weil die Funktion zurückschreibt.
 - Großschreibung wird erzwungen: Typen und Varianten groß, Funktionen, Variablen, Parameter und Felder klein.
 
-Vorschläge aus dem Bau der Typprüfung, im Prüfstand so umgesetzt, Entscheidung des Autors offen:
-
-1. Ein fester Wert gilt als bewiesen, wenn der Compiler ihn gegen die Einschränkung nachrechnet:
-   `let a: Age = 36` geht, `200` wird abgelehnt.
-2. `[a, b, c]` hat den Typ `Table<T, 3>`. Eine `Table<T, n>` passt, wo `List<T>` erwartet wird, nicht umgekehrt.
-3. Die Angaben einer Variante erreicht man nur über `match`, nicht mit `wert.feld`.
-4. Eine Funktion mit Ergebnistyp endet auf jedem Weg mit `return`. Nur `Done` darf fehlen.
-5. `+` verbindet auch Text mit Text. Text und Zahl mischt man über `"{wert}"`.
-6. Bei Namen zählt nur das erste Zeichen. `_name` gilt als klein.
-7. Sind Ergebnis- und Fehlertyp derselbe Typ, ist unklar, was ein `return` bedeutet. Verbieten?
+- Ein fester Wert gilt als bewiesen, wenn der Compiler ihn gegen die Einschränkung nachrechnet:
+  `let a: Age = 36` geht, `200` wird abgelehnt.
+- `[a, b, c]` hat den Typ `Table<T, 3>`. Eine `Table<T, n>` passt, wo `List<T>` erwartet wird, nicht umgekehrt.
+- Die Angaben einer Variante erreicht man nur über `match`, nicht mit `wert.feld`.
+- Eine Funktion mit Ergebnistyp endet auf jedem Weg mit `return`. Nur `Done` darf fehlen.
+- `+` verbindet auch Text mit Text. Text und Zahl mischt man über `"{wert}"`.
+- Bei Namen zählt nur das erste Zeichen. `_name` gilt als klein.
+- Ergebnis- und Fehlertyp einer Funktion sind zwei verschiedene Typen.
 
 ## Zahlen und Bits
 
@@ -162,6 +160,30 @@ Endlosschleifen sowie Assembler- und Fremdfunktionen.
 
 ## Offen
 
-Nur noch die Prüfung des Namens "Latch" gegen Marken und Domains.
+Die Prüfung des Namens "Latch" gegen Marken und Domains.
+
+Vorschläge aus dem Bau der entschiedenen Sprachteile. Der Prüfstand setzt sie so um, die Entscheidung
+des Autors steht aus:
+
+1. Konstanten schreiben sich groß (`const WIDTH = 80`) und teilen sich den Namensraum mit Typen und
+   Varianten. Der Wert ist ein reiner, offener Ausdruck, ein Typ darf dabeistehen: `const MAX: Age = 150`.
+2. `test "name" { ... }` hat keinen Kopf, ist rein und endet mit `return` und einem Wahrheitswert.
+   `true` heißt bestanden. Ein eigenes Wort wie assert gibt es nicht.
+3. `with` gilt nur für Datensätze, nicht für Ressourcen. In der Bedingung von `if` und `while` steht es in Klammern.
+4. `while` ohne `decreases` ist nur eine Warnung, `invariant` ist freiwillig. Soll fehlendes `decreases` ein Fehler sein?
+5. Module: `import Screen` steht direkt nach `latch 1`. Der Modulname ist der Dateiname, groß geschrieben.
+   Fremde Namen tragen immer das Modul: `Screen.put(...)`, `Screen.Cursor`, `Screen.Red(2)`, `Screen.WIDTH`.
+   Die Varianten einer öffentlichen Aufzählung sind öffentlich.
+6. Der Vertrag einer öffentlichen Funktion ist mindestens ein `requires` oder `ensures`.
+   Bei `assembly` und `foreign` genügt die Annahme.
+7. Eine Funktion mit `handles Interrupt(n)` hat keine Parameter und kein Ergebnis. Je Nummer gibt es genau eine.
+   Ihre Rechte müssen in denen von `main` enthalten sein.
+8. In `together` steht in jeder Zeile ein `let`. Die Zeilen sehen die Namen der anderen nicht und benutzen
+   nichts, was eine andere Zeile mit `change` oder `take` anfasst.
+9. `forever` verlässt man nur mit `return`. Code dahinter ist eine Warnung.
+10. Das Ergebnis einer `foreign function` gilt als geprüft, die Annahme deckt es. Oder muss es `unchecked` sein?
+11. `Bits` rechnet nur mit Zahlen ab 0.
+12. `old(x)` steht nur in `ensures`.
+13. Vorläufige Bibliotheksnamen: `Console.read`, `Env.get`, `File.append`, `File.find`, `File.count`.
 
 Verwandtes Projekt: Vow (github.com/vow-lang/vow), verifizierte Sprache für KI-Agenten.
