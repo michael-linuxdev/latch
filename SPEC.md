@@ -158,32 +158,33 @@ Gebaut wird das nach dem ersten Compiler.
 Der Compiler erzeugt je Programm: Rechte, Verträge, Annahmen, Freigaben, Unterbrechungen,
 Endlosschleifen sowie Assembler- und Fremdfunktionen.
 
+## Einzelheiten der Sprachteile
+
+- Konstanten schreiben sich groß (`const WIDTH = 80`) und teilen sich den Namensraum mit Typen und
+  Varianten. Der Wert ist ein reiner, offener Ausdruck, ein Typ darf dabeistehen: `const MAX: Age = 150`.
+- `test "name" { ... }` hat keinen Kopf, ist rein und endet mit `return` und einem Wahrheitswert.
+  `true` heißt bestanden. Ein eigenes Wort wie assert gibt es nicht.
+- `with` gilt nur für Datensätze, nicht für Ressourcen. In der Bedingung von `if` und `while` steht es in Klammern.
+- `while` ohne `decreases` ist eine Warnung, kein Fehler. `invariant` ist freiwillig.
+- Module: `import Screen` steht direkt nach `latch 1`. Der Modulname ist der Dateiname, groß geschrieben.
+  Fremde Namen tragen immer das Modul: `Screen.put(...)`, `Screen.Cursor`, `Screen.Red(2)`, `Screen.WIDTH`.
+  Die Varianten einer öffentlichen Aufzählung sind öffentlich.
+- Der Vertrag einer öffentlichen Funktion ist mindestens ein `requires` oder `ensures`.
+  Bei `assembly` und `foreign` genügt die Annahme.
+- Eine Funktion mit `handles Interrupt(n)` hat keine Parameter und kein Ergebnis. Je Nummer gibt es genau eine.
+  Ihre Rechte müssen in denen von `main` enthalten sein.
+- In `together` steht in jeder Zeile ein `let`. Die Zeilen sehen die Namen der anderen nicht und benutzen
+  nichts, was eine andere Zeile mit `change` oder `take` anfasst.
+- `forever` verlässt man nur mit `return`. Code dahinter ist eine Warnung.
+- Das Ergebnis einer `foreign function` gilt als geprüft, die Annahme deckt es.
+- `Bits` rechnet nur mit Zahlen ab 0.
+- `old(x)` steht nur in `ensures`.
+- Bibliotheksnamen: `Console.read`, `Env.get`, `File.append`, `File.find`, `File.count`.
+
 ## Offen
 
-Die Prüfung des Namens "Latch" gegen Marken und Domains.
-
-Vorschläge aus dem Bau der entschiedenen Sprachteile. Der Prüfstand setzt sie so um, die Entscheidung
-des Autors steht aus:
-
-1. Konstanten schreiben sich groß (`const WIDTH = 80`) und teilen sich den Namensraum mit Typen und
-   Varianten. Der Wert ist ein reiner, offener Ausdruck, ein Typ darf dabeistehen: `const MAX: Age = 150`.
-2. `test "name" { ... }` hat keinen Kopf, ist rein und endet mit `return` und einem Wahrheitswert.
-   `true` heißt bestanden. Ein eigenes Wort wie assert gibt es nicht.
-3. `with` gilt nur für Datensätze, nicht für Ressourcen. In der Bedingung von `if` und `while` steht es in Klammern.
-4. `while` ohne `decreases` ist nur eine Warnung, `invariant` ist freiwillig. Soll fehlendes `decreases` ein Fehler sein?
-5. Module: `import Screen` steht direkt nach `latch 1`. Der Modulname ist der Dateiname, groß geschrieben.
-   Fremde Namen tragen immer das Modul: `Screen.put(...)`, `Screen.Cursor`, `Screen.Red(2)`, `Screen.WIDTH`.
-   Die Varianten einer öffentlichen Aufzählung sind öffentlich.
-6. Der Vertrag einer öffentlichen Funktion ist mindestens ein `requires` oder `ensures`.
-   Bei `assembly` und `foreign` genügt die Annahme.
-7. Eine Funktion mit `handles Interrupt(n)` hat keine Parameter und kein Ergebnis. Je Nummer gibt es genau eine.
-   Ihre Rechte müssen in denen von `main` enthalten sein.
-8. In `together` steht in jeder Zeile ein `let`. Die Zeilen sehen die Namen der anderen nicht und benutzen
-   nichts, was eine andere Zeile mit `change` oder `take` anfasst.
-9. `forever` verlässt man nur mit `return`. Code dahinter ist eine Warnung.
-10. Das Ergebnis einer `foreign function` gilt als geprüft, die Annahme deckt es. Oder muss es `unchecked` sein?
-11. `Bits` rechnet nur mit Zahlen ab 0.
-12. `old(x)` steht nur in `ensures`.
-13. Vorläufige Bibliotheksnamen: `Console.read`, `Env.get`, `File.append`, `File.find`, `File.count`.
+- Die Prüfung des Namens "Latch" gegen Marken und Domains.
+- Wo sich eine Funktion mit `handles` etwas merkt, etwa die Schreibmarke. Es gibt keinen veränderlichen
+  Zustand außerhalb von Funktionen.
 
 Verwandtes Projekt: Vow (github.com/vow-lang/vow), verifizierte Sprache für KI-Agenten.

@@ -44,7 +44,7 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 - Wer ein Modul mit Fehlern beim Verbinden importiert (unbekannter oder privater Name), sieht nur diese Fehler.
   Die übrige Prüfung läuft erst danach.
 - Assembler wird nicht ausgeführt, Hardware ist nachgebaut (VGA-Text ab 0xB8000, COM1 0x3F8, PS/2 0x60/0x64).
-- `List.at`, `Table.fill`, `Console.read`, `Env.get` und `File.append/find/count` sind vorläufige Bibliotheksnamen.
+- `List.at` und `Table.fill` sind vorläufige Bibliotheksnamen.
 
 ## Nächste Aufgaben, in dieser Reihenfolge
 
@@ -52,7 +52,7 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
    Typen nur über `check` oder einen festen Wert, Großschreibung). Die Regeln stehen in `SPEC.md` unter "Typprüfung".
 2. Erledigt: Module mit `public` und `import`, `together`, `foreign function`, `handles Interrupt(n)`, `const`,
    `test`, `with`, `forever`, `old`, `invariant`, `decreases`, die Bibliothek `Bits`, der feste Katalog der
-   Rechte. Dreizehn Vorschläge dazu stehen in `SPEC.md` unter "Offen" und warten auf die Entscheidung des Autors.
+   Rechte. Die Einzelheiten stehen in `SPEC.md` unter "Einzelheiten der Sprachteile".
 3. Die vier Kern-Bausteine (Bildschirm, Tastatur, Seitenverwalter, Planer) zu einem Programm verbinden,
    mit `forever` als Hauptschleife.
 4. Compiler. Vorschlag als erster Schritt: Latch nach freistehendem C übersetzen, mit einem kleinen
