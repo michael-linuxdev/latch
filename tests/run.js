@@ -1224,7 +1224,7 @@ function main() { }`, '', r => one(r, /Nach public folgt type, enum, resource, c
 /* ---------- Aufgabe 3: der Kern aus kernel/ ---------- */
 const KDIR = __dirname + '/../kernel/';
 const KMODS = {};
-for (const f of require('fs').readdirSync(KDIR)) if (f !== 'main.latch') KMODS[f.replace('.latch', '')] = require('fs').readFileSync(KDIR + f, 'utf8');
+for (const f of require('fs').readdirSync(KDIR)) if (f.endsWith('.latch') && f !== 'main.latch') KMODS[f.replace('.latch', '')] = require('fs').readFileSync(KDIR + f, 'utf8');
 const KMAIN = require('fs').readFileSync(KDIR + 'main.latch', 'utf8');
 const serial = r => r.output.filter(o => o.kind === 'serial').map(o => o.text.split(' ')[0]).join();
 t('kernel: screen, keyboard, pages and scheduler in one loop', KMAIN, 'keys = hallo latch\nticks = 7', r => clean(r) && r.warnings.length === 0
@@ -1236,6 +1236,32 @@ t('kernel: ticks only, pages come back', KMAIN, 'ticks = 3', r => clean(r) && r.
 t('kernel: broken keyboard is an event, not a crash', KMAIN, 'interrupts = 33 32\nport 0x60 = kaputt', r => clean(r) && serial(r) === 'Kern,Tastatur,editor', KMODS);
 t('kernel: lines fit a phone', KMAIN, '', r => Object.values(KMODS).concat([KMAIN]).join('\n').split('\n').every(l => l.length <= 44), KMODS);
 t('kernel: a module without its right is rejected', KMAIN.replace('Port(0x60), Port(0x3F8),', 'Port(0x3F8),'), '', r => one(r, /on_key behandelt Interrupt\(33\) und braucht Port\(0x60\)/), KMODS);
+
+/* ---------- Aufgabe 6: Bericht als eigenes Dokument ---------- */
+const doc = (src, mods, title) => Latch.reportDocument(Latch.check(src, mods), title);
+t('report document: kernel/REPORT.md is up to date', KMAIN, '', r => require('../tools/report.js').report(KDIR + 'main.latch', 'Latch OS, Kern') === require('fs').readFileSync(KDIR + 'REPORT.md', 'utf8'), KMODS);
+t('report document: names rights, assumptions, unchecked code', KMAIN, '', r => { const d = doc(KMAIN, KMODS, 'Kern');
+  return /^# Bericht: Kern\n/.test(d) && /\*\*Angenommen\.\*\*/.test(d) && /## Das Programm darf\n\n- `Memory\(0xB8000\.\.0xB8F9F\)`/.test(d)
+    && /- `Sched\.switch_to`: "saves and loads all registers"/.test(d) && /- `Sched\.switch_to` \(Assembler\), Rechte: `Cpu`/.test(d)
+    && /- `Interrupt\(33\)` ruft `on_key`, gemeldet wird `Event`/.test(d) && /- `main`, Zeile \d+/.test(d) && /### Pages\.alloc \(öffentlich\)/.test(d)
+    && /- sichert zu: `pool\.free == old\(pool\.free\) - 1`/.test(d) && /- Screen: "erste Zelle"\n/.test(d) && /Nicht bewiesen: Verträge/.test(d); }, KMODS);
+t('report document: reveals, foreign code, test results', `latch 1
+foreign function c_time() -> Int assumes "time from libc"
+function show() uses Console {
+    let pin = secret 4711
+    Console.print(reveal pin because "user must type it")
+}
+test "eins" { return 1 == 1 }
+test "zwei" { return 1 == 2 }
+function main() uses Console { show() }`, '', r => { const d = Latch.reportDocument(r, 'x');
+  return /- `show`, Zeile 5: `pin`, weil "user must type it"/.test(d) && /- `c_time` \(fremder Code\), Rechte: keine/.test(d)
+    && /- "eins", bestanden\n- "zwei", gescheitert: Der Test gab false zurück\./.test(d) && /## Unterbrechungen\n\nKeine\./.test(d); });
+t('report document: a rejected program says so', `latch 1
+function main() { Console.print("x") }`, '', r => { const d = Latch.reportDocument(r, 'x');
+  return /\*\*Abgelehnt\.\*\* Das Programm läuft nicht\. Ein Fehler:\n\n- Zeile 2: main braucht das Recht Console/.test(d) && !/## Funktionen/.test(d); });
+t('report document: pure program, check does not run it', `latch 1
+function main() -> Int { return 1 / 0 }`, '', r => { const c = Latch.check(`latch 1
+function main() -> Int { return 1 / 0 }`); return c.ran === false && /Nichts nach außen\. Das Programm ist rein\./.test(Latch.reportDocument(c)) && /Division/.test(r.runtimeError.msg); });
 
 let failed = 0;
 for (const c of cases) {

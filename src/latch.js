@@ -1767,7 +1767,7 @@ function checkProgram(prog) {
       var kind = f.assembly ? 'assembly' : 'foreign';
       if (f.assembly && !f.rights.some(function (d) { return d.name === 'Cpu'; })) err(f.line, 'Die assembly-Funktion ' + f.name + ' braucht uses Cpu.');
       if (!f.assumes.length) err(f.line, 'Die ' + kind + '-Funktion ' + f.name + ' braucht mindestens eine Annahme (assumes), weil niemand ihren Inhalt prüft.');
-      report.functions.push({ name: f.name, line: f.line, module: f.module || '', assembly: f.assembly, foreign: f.foreign, handles: null, forever: [],
+      report.functions.push({ name: f.name, line: f.line, module: f.module || '', public: !!f.public, assembly: f.assembly, foreign: f.foreign, handles: null, forever: [],
         rights: f.rights.map(fmtRight), changes: [], takes: [],
         requires: f.requires.map(function (c) { return c.text; }), ensures: f.foreign ? f.ensures.map(function (c) { return c.text; }) : [],
         assumes: f.assumes.map(function (a) { return a.text; }), reveals: [] });
@@ -1793,7 +1793,7 @@ function checkProgram(prog) {
     ctx.forever.forEach(function (ln) { report.forever.push({ name: f.name, line: ln, module: f.module || '' }); });
     if (f.handles) report.interrupts.push({ n: f.handles.n, name: f.name, module: f.module || '', event: f.ret || '' });
     report.functions.push({
-      name: f.name, line: f.line, module: f.module || '', assembly: false, foreign: false, handles: f.handles ? f.handles.n : null, forever: ctx.forever,
+      name: f.name, line: f.line, module: f.module || '', public: !!f.public, assembly: false, foreign: false, handles: f.handles ? f.handles.n : null, forever: ctx.forever,
       rights: f.rights.map(fmtRight),
       changes: f.params.filter(function (p) { return p.mode === 'change'; }).map(function (p) { return p.name + ': ' + p.type; }),
       takes: f.params.filter(function (p) { return p.mode === 'take'; }).map(function (p) { return p.name + ': ' + p.type; }),
@@ -2419,7 +2419,10 @@ function execute(info, worldText, proofs, lenient) {
 }
 
 /* modules: weitere Dateien als { Modulname: Quelltext }. Jede Datei ist ein Modul. */
-function run(src, worldText, modules) {
+function run(src, worldText, modules) { return runOrCheck(src, worldText, modules, true); }
+/* Nur prüfen, nichts ausführen. Grundlage für den Bericht. */
+function check(src, modules) { return runOrCheck(src, '', modules, false); }
+function runOrCheck(src, worldText, modules, execute_) {
   var result = { errors: [], warnings: [], report: null, output: [], runtimeError: null, mainResult: null, mainFailed: false, ran: false, screen: null, tests: [], halted: null };
   var prog;
   try { prog = parseSource(src); }
@@ -2433,7 +2436,7 @@ function run(src, worldText, modules) {
   result.errors = info.errors;
   result.warnings = info.warnings;
   result.report = info.report;
-  if (info.errors.length) return result;
+  if (info.errors.length || !execute_) return result;
   var ex2 = execute(info, worldText);
   result.ran = true;
   result.output = ex2.output;
@@ -2446,5 +2449,84 @@ function run(src, worldText, modules) {
   return result;
 }
 
-root.Latch = { run: run };
+/* ---------- Bericht als eigenes Dokument ----------
+   Reiner Text (Markdown): lesbar ohne Werkzeug, vergleichbar zwischen zwei Fassungen, unterschreibbar.
+   r ist das Ergebnis von run() oder check(). */
+var VERSION = '0.9';
+function reportDocument(r, title) {
+  var L = [], rep = r.report;
+  function where(x) { return (x.module ? 'Modul ' + x.module + ', ' : '') + 'Zeile ' + x.line; }
+  function list(items, empty) { if (items.length) items.forEach(function (x) { L.push('- ' + x); }); else L.push(empty); L.push(''); }
+  L.push('# Bericht: ' + (title || 'Latch-Programm'), '');
+  L.push('Erzeugt vom Latch-Prüfstand ' + VERSION + ' aus dem Quelltext. Der Bericht sagt, was das Programm darf,');
+  L.push('was es verspricht und wofür ein Mensch einstehen muss.', '');
+  if (r.errors.length || !rep) {
+    L.push('## Ergebnis der Prüfung', '', '**Abgelehnt.** Das Programm läuft nicht. ' + (r.errors.length === 1 ? 'Ein Fehler:' : r.errors.length + ' Fehler:'), '');
+    list(r.errors.map(function (e) { return where(e) + ': ' + e.msg; }), '');
+    return L.join('\n').replace(/\n+$/, '\n');
+  }
+  L.push('## Ergebnis der Prüfung', '');
+  L.push('**Angenommen.** Geprüft sind Rechte, Typen, ungeprüfte Daten, Geheimnisse, Fehlerfälle und Ressourcen.', '');
+  L.push('Nicht bewiesen: Verträge (`requires`, `ensures`, `invariant`, `decreases`), Tabellengrenzen und berechnete');
+  L.push('Hardware-Adressen. Der Prüfstand prüft sie erst beim Ausführen.', '');
+  if (r.warnings.length) { L.push('Warnungen:', ''); list(r.warnings.map(function (w) { return where(w) + ': ' + w.msg; }), ''); }
+
+  L.push('## Das Programm darf', '');
+  list(rep.program.map(function (x) { return '`' + x + '`'; }), 'Nichts nach außen. Das Programm ist rein.');
+
+  var fns = rep.functions;
+  var assumed = [];
+  fns.forEach(function (f) { f.assumes.forEach(function (a) { assumed.push('`' + f.name + '`: "' + a + '"'); }); });
+  L.push('## Annahmen', '', 'Was sich nicht beweisen lässt. Dafür steht ein Mensch ein.', '');
+  list(assumed, 'Keine.');
+
+  L.push('## Ungeprüfter Code', '', 'Assembler und fremder Code. Niemand prüft den Inhalt, es gelten nur Kopf und Annahmen.', '');
+  list(fns.filter(function (f) { return f.assembly || f.foreign; }).map(function (f) {
+    return '`' + f.name + '` (' + (f.assembly ? 'Assembler' : 'fremder Code') + '), Rechte: ' + (f.rights.length ? f.rights.map(function (x) { return '`' + x + '`'; }).join(', ') : 'keine');
+  }), 'Keiner.');
+
+  var reveals = [];
+  fns.forEach(function (f) { (f.reveals || []).forEach(function (v) { reveals.push('`' + f.name + '`, Zeile ' + v.line + ': `' + v.text + '`, weil "' + v.reason + '"'); }); });
+  L.push('## Freigaben von Geheimnissen', '');
+  list(reveals, 'Keine.');
+
+  L.push('## Unterbrechungen', '');
+  list((rep.interrupts || []).map(function (i) { return '`Interrupt(' + i.n + ')` ruft `' + i.name + '`, gemeldet wird `' + i.event + '`'; }), 'Keine.');
+
+  L.push('## Endlosschleifen', '');
+  list((rep.forever || []).map(function (f) { return '`' + f.name + '`, ' + where(f); }), 'Keine. Ob jede `while`-Schleife endet, ist nicht bewiesen.');
+
+  if ((rep.modules || []).length) { L.push('## Module', ''); list(rep.modules.map(function (m) { return '`' + m + '`'; }), ''); }
+
+  L.push('## Funktionen', '');
+  fns.forEach(function (f) {
+    var marks = [];
+    if (f.public) marks.push('öffentlich');
+    if (f.assembly) marks.push('Assembler');
+    if (f.foreign) marks.push('fremder Code');
+    if (f.handles !== null && f.handles !== undefined) marks.push('behandelt Interrupt(' + f.handles + ')');
+    if (f.forever && f.forever.length) marks.push('endet nie');
+    L.push('### ' + f.name + (marks.length ? ' (' + marks.join(', ') + ')' : ''), '');
+    L.push('- Rechte: ' + (f.rights.length ? f.rights.map(function (x) { return '`' + x + '`'; }).join(', ') : 'keine, die Funktion ist rein'));
+    f.changes.forEach(function (c) { L.push('- verändert: `' + c + '`'); });
+    f.takes.forEach(function (c) { L.push('- übernimmt: `' + c + '`'); });
+    f.requires.forEach(function (c) { L.push('- verlangt: `' + c + '`'); });
+    f.ensures.forEach(function (c) { L.push('- sichert zu: `' + c + '`'); });
+    f.assumes.forEach(function (c) { L.push('- nimmt an: "' + c + '"'); });
+    L.push('');
+  });
+
+  if ((rep.tests || []).length) {
+    var done = {};
+    (r.tests || []).forEach(function (t) { done[t.module + '|' + t.name] = t; });
+    L.push('## Tests', '');
+    list(rep.tests.map(function (t) {
+      var res = done[t.module + '|' + t.name];
+      return (t.module ? t.module + ': ' : '') + '"' + t.name + '"' + (res ? (res.ok ? ', bestanden' : ', gescheitert: ' + res.msg) : '');
+    }), '');
+  }
+  return L.join('\n').replace(/\n+$/, '\n');
+}
+
+root.Latch = { run: run, check: check, reportDocument: reportDocument, version: VERSION };
 })(typeof module !== 'undefined' && module.exports ? module.exports : (typeof window !== 'undefined' ? window : this));
