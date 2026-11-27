@@ -82,7 +82,7 @@ function main()
          Port(0x60), Port(0x3F8),
          Cpu, Interrupt
 {
-    var cur = Screen.start()
+    var cur = Screen.clear()
     Screen.print(change cur, "Latch OS 0.1")
     Screen.newline(change cur)
 

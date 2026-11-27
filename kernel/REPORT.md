@@ -61,6 +61,12 @@ Keine.
 - sichert zu: `result.row == 0`
 - sichert zu: `result.col == 0`
 
+### Screen.clear (öffentlich)
+
+- Rechte: `Memory(0xB8000..0xB8F9F)`
+- sichert zu: `result.row == 0`
+- sichert zu: `result.col == 0`
+
 ### Screen.cell
 
 - Rechte: keine, die Funktion ist rein

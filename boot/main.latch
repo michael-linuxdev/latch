@@ -16,21 +16,11 @@ function log(msg: Text)
     Port.write(0x3F8, 10)
 }
 
-function clear()
-    uses Memory(0xB8000..0xB8F9F)
-{
-    var cur = Screen.start()
-    for i in 1..Screen.WIDTH * Screen.HEIGHT {
-        Screen.put(change cur, 32)
-    }
-}
-
 function main()
     uses Memory(0xB8000..0xB8F9F),
          Port(0x3F8)
 {
-    clear()
-    var cur = Screen.start()
+    var cur = Screen.clear()
     Screen.print(change cur, "Latch OS")
     Screen.newline(change cur)
     Screen.print(change cur,
