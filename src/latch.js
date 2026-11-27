@@ -1532,6 +1532,7 @@ function checkProgram(prog) {
     lowerName(s.name, 'Variablen', s.line);
     var lty = r.type, ann = s.type ? resolve(s.type, s.line) : null;
     if (ann) { fits(s.e, r.type, ann, s.line, 'Die Variable ' + s.name); lty = ann; }
+    s.ty = lty;
     declare(env, ctx, s.name, { taint: r.taint, mut: s.mut, lin: r.lin, own: true, canChange: s.mut, region: r.region, line: s.line, type: lty });
   }
   function pureCtx(ctx, what) {
@@ -1699,6 +1700,7 @@ function checkProgram(prog) {
           else err(s.line, 'for läuft über einen Bereich (a..b) oder eine Liste, vorhanden ist ' + tstr(it.type) + '.');
         }
         ctx.loop++;
+        s.ty = itT;
         block(s.body, env, ctx, function (local) { declare(local, ctx, s.name, { taint: it.taint, line: s.line, type: itT }); });
         ctx.loop--;
         break;
@@ -2420,6 +2422,17 @@ function execute(info, worldText, proofs, lenient) {
 
 /* modules: weitere Dateien als { Modulname: Quelltext }. Jede Datei ist ein Modul. */
 function run(src, worldText, modules) { return runOrCheck(src, worldText, modules, true); }
+/* Geprüftes Programm mit Typen an jedem Ausdruck (e.ty). Grundlage für den Compiler. */
+function analyze(src, modules) {
+  var prog;
+  try { prog = parseSource(src); }
+  catch (ex) { if (ex instanceof LatchError) return { errors: [{ line: ex.line, msg: ex.message }] }; throw ex; }
+  var linked = linkProgram(prog, modules);
+  if (linked.errors.length) return { errors: linked.errors };
+  var info = checkProgram(linked.prog);
+  info.fold = fold;
+  return info;
+}
 /* Nur prüfen, nichts ausführen. Grundlage für den Bericht. */
 function check(src, modules) { return runOrCheck(src, '', modules, false); }
 function runOrCheck(src, worldText, modules, execute_) {
@@ -2528,5 +2541,5 @@ function reportDocument(r, title) {
   return L.join('\n').replace(/\n+$/, '\n');
 }
 
-root.Latch = { run: run, check: check, reportDocument: reportDocument, version: VERSION };
+root.Latch = { run: run, check: check, analyze: analyze, reportDocument: reportDocument, version: VERSION };
 })(typeof module !== 'undefined' && module.exports ? module.exports : (typeof window !== 'undefined' ? window : this));

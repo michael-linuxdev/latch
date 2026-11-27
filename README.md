@@ -5,15 +5,20 @@ ungeprüfte Daten nichts auslösen können. Gedacht für KI-geschriebenen Code, 
 voreinander verantworten müssen, bis hinunter zum Betriebssystemkern.
 
 Stand: Prototyp 0.9. Ein Interpreter mit statischem Prüfer läuft im Browser ("Latch Prüfstand").
-Einen Compiler gibt es noch nicht.
+Der Compiler steht am Anfang: Er übersetzt einen Teil der Sprache nach C, das Ergebnis startet als Kern in QEMU.
 
     node tests/run.js        # 180 Testprogramme
     node tests/examples.js   # alle Beispiele der Seite
     python3 build.py         # baut site/index.html
+    node tests/compile.js    # Compiler: Prüfstand gegen QEMU (braucht gcc, ld, qemu-system-i386)
+    node tools/compile.js boot/main.latch kernel build   # baut build/kernel.elf
+    qemu-system-i386 -kernel build/kernel.elf            # startet ihn
     node tools/report.js kernel/main.latch "Latch OS, Kern" > kernel/REPORT.md
 
 - `kernel/` ist der Anfang von Latch OS: Bildschirm, Tastatur, Seitenverwalter und Planer als Module,
   verbunden in `main.latch`. Er läuft bisher nur im Prüfstand. `kernel/REPORT.md` ist sein Bericht:
   was der Kern darf, was er verspricht und wofür ein Mensch einsteht.
+- `boot/main.latch` ist der Kern, den der Compiler schon übersetzen kann: Er schreibt "Latch OS" über das
+  Modul `Screen` in den echten Bildschirmspeicher.
 - `SPEC.md` fasst die entschiedenen Sprachregeln zusammen.
 - `CLAUDE.md` beschreibt Arbeitsweise und nächste Aufgaben.

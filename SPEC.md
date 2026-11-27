@@ -144,10 +144,10 @@ Reihenfolge im Kopf damit: Parameter, `->`, `handles`, `uses`, `requires`, `ensu
 - `main` holt die Ereignisse in der Hauptschleife ab und braucht dafür `uses Interrupt`:
   `Interrupt.wait()` schläft, bis eines da ist. `Interrupt.next()` wartet nicht und scheitert mit `Missing`.
 - Der ganze veränderliche Zustand bleibt so in `main`. Außerhalb von Funktionen gibt es keinen.
-- Ist die Warteschlange voll, geht das neue Ereignis verloren und wird gezählt: `Interrupt.lost()`.
+- Die Warteschlange fasst 64 Ereignisse. Ist sie voll, geht das neue Ereignis verloren und wird gezählt:
+  `Interrupt.lost()`.
 - Die Rechte einer Funktion mit `handles` müssen in denen von `main` enthalten sein.
 
-Vorschlag, im Prüfstand so umgesetzt, Entscheidung des Autors offen: Die Warteschlange fasst 64 Ereignisse.
 
 ## Beweise
 
@@ -161,6 +161,10 @@ Vorschlag, im Prüfstand so umgesetzt, Entscheidung des Autors offen: Die Wartes
 
 - `forever { ... }` ist die gewollte Endlosschleife und steht im Bericht.
 - `if`/`else`, `for x in ...`, `while`, `match` sind endgültig.
+
+## Compiler
+
+Der Compiler übersetzt Latch zuerst nach freistehendem C. Direkter Maschinencode kann später danebentreten.
 
 ## Gehärtete Daten
 
@@ -195,7 +199,6 @@ Endlosschleifen sowie Assembler- und Fremdfunktionen.
 
 ## Offen
 
-- Die Prüfung des Namens "Latch" gegen Marken und Domains.
-- Die Größe der Warteschlange für Ereignisse (siehe "Unterbrechungen").
+Nur noch die Prüfung des Namens "Latch" gegen Marken und Domains.
 
 Verwandtes Projekt: Vow (github.com/vow-lang/vow), verifizierte Sprache für KI-Agenten.

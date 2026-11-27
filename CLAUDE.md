@@ -15,12 +15,17 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
 - `Latch.run(quelltext, aussenwelt, module)`: `module` ist `{ Modulname: Quelltext }`. Importierte Namen
   heißen intern `Screen.put`, danach arbeiten Prüfer und Interpreter auf einem einzigen Programm.
 - `kernel/`: der Kern als Module, `main.latch` ist der Einstieg. Zeilen höchstens rund 40 Zeichen.
+- `src/compile_c.js`: Compiler, erster Schritt. Übersetzt nach freistehendem C, was von `main` aus erreichbar ist.
+  `tools/compile.js` baut daraus mit gcc und ld einen Multiboot-Kern. `boot/main.latch` ist das Programm dazu.
+- `tests/compile.js`: übersetzt, startet in QEMU und vergleicht Bildschirm und serielle Ausgabe mit dem Prüfstand.
 - `build.py`: erzeugt `site/index.html`, setzt dabei `src/latch.js` und die Dateien aus `kernel/` ein.
 - `tests/run.js`: Testprogramme mit erwartetem Ergebnis. `tests/examples.js`: lässt alle Beispiele laufen.
 
 ## Regeln für die Arbeit
 
 - Vor jedem Commit: `node tests/run.js` und `node tests/examples.js` müssen durchlaufen.
+- Nach Änderungen am Compiler oder an `kernel/Screen.latch`: `node tests/compile.js`. Ohne gcc, ld und
+  qemu-system-i386 prüft der Test nur das Übersetzen nach C und sagt das.
 - Nach jeder Änderung am Kern oder am Bericht: `kernel/REPORT.md` neu erzeugen (Befehl in `README.md`).
   Ein Test vergleicht die Datei mit dem aktuellen Stand. So zeigt jeder Unterschied im Bericht, was sich an
   Rechten, Verträgen und Annahmen geändert hat.
@@ -58,9 +63,15 @@ und keine neue Regel ein, ohne nachzufragen. Schlage vor, begründe kurz, warte 
    Rechte. Die Einzelheiten stehen in `SPEC.md` unter "Einzelheiten der Sprachteile".
 3. Erledigt: `kernel/` verbindet Bildschirm, Tastatur, Seitenverwalter und Planer als Module zu einem Programm.
    `main.latch` hält den Zustand und holt Ereignisse in `forever` mit `Interrupt.wait()` ab.
-4. Compiler. Vorschlag als erster Schritt: Latch nach freistehendem C übersetzen, mit einem kleinen
-   Startcode als Multiboot-Kern in QEMU starten und "Latch OS" auf den echten VGA-Textspeicher schreiben.
-   Vorher mit dem Autor klären, ob C als Zwischenschritt in Ordnung ist oder direkt Maschinencode gewünscht ist.
+4. Compiler. Der erste Schritt ist als Vorschlag gebaut: Latch nach freistehendem C, Multiboot-Kern in QEMU,
+   "Latch OS" steht im echten VGA-Textspeicher. Die Entscheidung des Autors steht aus, ob C als Zwischenschritt
+   bleibt oder direkt Maschinencode entstehen soll. Bis dahin nicht weiter ausbauen.
+   Der Compiler kann: Int (64 Bit, Überlauf hält an), Bool, feste Texte, Datensätze, `change`, `const`, `with`,
+   `if`, `while` mit `invariant` und `decreases`, `for` über Bereiche und `Text.bytes`, `forever`, Verträge mit `old`,
+   `Memory`, `Port.write`, `Bits`. Er kann noch nicht: `fails`, `otherwise`, `check`, `match`, Aufzählungen,
+   Ressourcen, Tabellen und Listen, eingesetzte Texte, `handles`, `assembly`, `foreign`, `together`, `region`.
+   Deshalb übersetzt er `kernel/main.latch` noch nicht. Verträge und berechnete Adressen prüft der übersetzte
+   Kern zur Laufzeit und hält bei einer Verletzung an. Der Prüfstand rechnet bis 2^53, der Compiler bis 2^63.
 5. Vertragsbeweis über einen SMT-Löser (zum Beispiel Z3) mit `old`, `invariant` und `decreases`.
    Erst damit gilt "Unbewiesenes läuft nicht". Tabellengrenzen und Hardware-Adressen gehören dazu.
 6. Erledigt: `Latch.reportDocument(ergebnis, titel)` gibt den Bericht als Text aus, `tools/report.js` schreibt ihn
