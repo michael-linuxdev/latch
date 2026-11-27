@@ -18,6 +18,20 @@ public function start() -> Cursor
     return Cursor { row: 0, col: 0 }
 }
 
+// Leert den Bildschirm und gibt die
+// Schreibmarke oben links zurueck.
+public function clear() -> Cursor
+    uses Memory(0xB8000..0xB8F9F)
+    ensures result.row == 0
+    ensures result.col == 0
+{
+    for i in 0..WIDTH * HEIGHT - 1 {
+        Memory.write(VGA + i * 2, 32)
+        Memory.write(VGA + i * 2 + 1, 0x0F)
+    }
+    return start()
+}
+
 function cell(cur: Cursor) -> Int
     requires cur.row in 0..HEIGHT - 1
     requires cur.col in 0..WIDTH - 1
